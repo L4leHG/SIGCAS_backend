@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from registro.apps.catastro.models import (
     Predio, CaracteristicasUnidadconstruccion, Unidadconstruccion, 
-    Terreno, PredioUnidadespacial, CrCondicionprediotipo, TerrenoZonas, Interesado,InteresadoPredio
+    Terreno, PredioUnidadespacial, CrCondicionprediotipo, TerrenoZonas, Interesado,InteresadoPredio,
+    EstructuraAvaluo
 )
 
 class CaracteristicasUnidadconstruccionSerializer(serializers.ModelSerializer):
@@ -101,6 +102,12 @@ class InteresadoSerializer(serializers.ModelSerializer):
             return obj.tipo_interesado.ilicode
         return None
 
+class EstructuraAvaluoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EstructuraAvaluo
+        fields = [
+            'fecha_avaluo', 'avaluo_catastral', 'vigencia'
+        ]
 
 class PredioSerializer(serializers.ModelSerializer):
     terreno_geo = serializers.SerializerMethodField()
@@ -113,9 +120,7 @@ class PredioSerializer(serializers.ModelSerializer):
     tipo = serializers.SerializerMethodField()
     tipo_predio = serializers.SerializerMethodField()
     interesado = serializers.SerializerMethodField()
-
-
-    
+    avaluo = serializers.SerializerMethodField()
 
     class Meta:
         model = Predio
@@ -125,8 +130,15 @@ class PredioSerializer(serializers.ModelSerializer):
             'condicion_predio', 'destinacion_economica',
             'area_catastral_terreno', 'vigencia_actualizacion_catastral',
             'estado', 'tipo', 'direccion', 'tipo_predio',
-            'terreno_geo', 'terreno_alfa', 'unidades_construccion_geo', 'interesado'
+            'terreno_geo', 'terreno_alfa', 'unidades_construccion_geo', 'interesado',
+            'avaluo'
         ]
+
+    def get_avaluo(self, obj):
+        instance = EstructuraAvaluo.objects.filter(predio=obj).order_by('-fecha_avaluo')
+        if instance.exists():
+            return EstructuraAvaluoSerializer(instance, many=True).data
+        return None
 
     def get_terreno_geo(self, obj):
         instance= PredioUnidadespacial.objects.filter(predio=obj, terreno__isnull=False)
