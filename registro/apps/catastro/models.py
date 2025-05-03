@@ -1,6 +1,6 @@
 from django.db import models
 from django.contrib.gis.db import models as modelsGis
-from registro.apps.login.models import Usuarios
+from registro.apps.users.models import User
 
 # Create your models here.
 # This is an auto-generated Django model module.
@@ -23,8 +23,10 @@ class CaracteristicasUnidadconstruccion(models.Model):
     estado_conservacion = models.CharField(max_length=50, blank=True, null=True)
     local_id = models.CharField(max_length=100, blank=True, null=True)
     avaluo_unidad = models.BigIntegerField(blank=True, null=True)
+    puntaje = models.IntegerField(blank=True, null=True)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'caracteristicas_unidadconstruccion'
     
@@ -37,6 +39,7 @@ class ColDocumentotipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'col_documentotipo'
         ordering = ["ilicode"]
 
@@ -50,6 +53,7 @@ class ColEstadodisponibilidadtipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         ordering = ["ilicode"]
         db_table = 'col_estadodisponibilidadtipo'
 
@@ -63,6 +67,7 @@ class ColFuenteadministrativatipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         ordering = ["ilicode"]
         db_table = 'col_fuenteadministrativatipo'
 
@@ -76,6 +81,7 @@ class ColInteresadotipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'col_interesadotipo'
         ordering = ["ilicode"]
 
@@ -89,6 +95,7 @@ class ColRelacionsuperficietipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'col_relacionsuperficietipo'
         ordering = ["ilicode"]
 
@@ -102,6 +109,7 @@ class ColUnidadadministrativabasicatipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'col_unidadadministrativabasicatipo'
         ordering = ["ilicode"]
 
@@ -116,6 +124,7 @@ class CrAutoreconocimientoetnicotipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_autoreconocimientoetnicotipo'
         ordering = ["ilicode"]
 
@@ -129,6 +138,7 @@ class CrCondicionprediotipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_condicionprediotipo'
         ordering = ["ilicode"]
 
@@ -142,6 +152,7 @@ class CrConstruccionplantatipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_construccionplantatipo'
         ordering = ["ilicode"]
 
@@ -155,6 +166,7 @@ class CrDerechotipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_derechotipo'
         ordering = ["ilicode"]
 
@@ -168,6 +180,7 @@ class CrDestinacioneconomicatipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_destinacioneconomicatipo'
         ordering = ["ilicode"]
 
@@ -181,6 +194,7 @@ class CrEstadotipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_estadotipo'
         ordering = ["ilicode"]
 
@@ -194,6 +208,7 @@ class CrMutaciontipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_mutaciontipo'
         ordering = ["ilicode"]
 
@@ -207,6 +222,7 @@ class CrPrediotipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_prediotipo'
         ordering = ["ilicode"]
 
@@ -220,6 +236,7 @@ class CrSexotipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_sexotipo'
         ordering = ["ilicode"]
 
@@ -233,6 +250,7 @@ class CrUnidadconstrucciontipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_unidadconstrucciontipo'
         ordering = ["ilicode"]
 
@@ -247,6 +265,7 @@ class CrUsouconstipo(models.Model):
     itfcode = models.IntegerField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'cr_usouconstipo'
         ordering = ["ilicode"]
 
@@ -266,6 +285,7 @@ class Derecho(models.Model):
     fin_vida_util_version = models.DateField(auto_now=False,blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'derecho'
 
 
@@ -275,6 +295,7 @@ class EnteEmisortipo(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'ente_emisortipo'
         ordering = ["ilicode"]
 
@@ -288,6 +309,7 @@ class EstadoAsignacion(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'estado_asignacion'
         ordering = ["ilicode"]
 
@@ -301,6 +323,7 @@ class EstadoRadicado(models.Model):
     description = models.TextField(blank=True, null=True)
 
     class Meta:
+        managed =False
         db_table = 'estado_radicado'
         ordering = ["ilicode"]
 
@@ -321,6 +344,7 @@ class FuenteAdministrativa(models.Model):
 
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'fuente_administrativa'
     def __str__(self):
@@ -346,6 +370,7 @@ class Interesado(models.Model):
     local_id = models.CharField(max_length=100, blank=True, null=True)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'interesado'
 
@@ -355,6 +380,7 @@ class InteresadoPredio(models.Model):
     predio = models.ForeignKey('Predio', on_delete=models.RESTRICT)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'interesado_predio'
         indexes = [
@@ -388,6 +414,7 @@ class Predio(models.Model):
     direccion = models.CharField(max_length=300, blank=True, null=True)
 
     class Meta:
+        managed =False
         ordering = ["numero_predial_nacional"]
         db_table = 'predio'
         indexes = [
@@ -402,6 +429,7 @@ class PredioFuenteadministrativa(models.Model):
     predio = models.ForeignKey(Predio, models.RESTRICT)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'predio_fuenteadministrativa'
 
@@ -412,8 +440,10 @@ class PredioFuenteadministrativa(models.Model):
 class PredioTramitecatastral(models.Model):
     predio = models.ForeignKey(Predio, models.RESTRICT)
     tramite_catastral = models.ForeignKey('TramiteCatastral', on_delete=models.RESTRICT)
+    radicado_asignado = models.ForeignKey('RadicadoPredioAsignado', on_delete=models.RESTRICT, null=True)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'predio_tramitecatastral'
     def __str__(self):
@@ -427,6 +457,7 @@ class PredioUnidadespacial(models.Model):
     local_id = models.CharField(max_length=200, blank=True, null=True)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'predio_unidadespacial'
     def __str__(self):
@@ -439,6 +470,7 @@ class Radicado(models.Model):
     estado_radicado = models.ForeignKey('EstadoRadicado', on_delete=models.RESTRICT)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'radicado'
         indexes = [
@@ -451,12 +483,13 @@ class Radicado(models.Model):
 class RadicadoPredioAsignado(models.Model):
     radicado = models.ForeignKey(Radicado, on_delete=models.RESTRICT)
     estado_asignacion = models.ForeignKey(EstadoAsignacion, on_delete=models.RESTRICT)
-    usuario_analista = models.ForeignKey('login.Usuarios' , on_delete=models.RESTRICT, related_name='radicado_analista',blank=True, null=True)
-    usuario_coordinador = models.ForeignKey('login.Usuarios' , on_delete=models.RESTRICT, related_name='radicado_coordinador', blank=True, null=True)
+    usuario_analista = models.ForeignKey(User , on_delete=models.RESTRICT, related_name='radicado_analista',blank=True, null=True)
+    usuario_coordinador = models.ForeignKey(User , on_delete=models.RESTRICT, related_name='radicado_coordinador', blank=True, null=True)
     mutacion = models.ForeignKey(CrMutaciontipo , on_delete=models.RESTRICT)
     predio = models.ForeignKey(Predio, on_delete=models.RESTRICT)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'radicado_predio_asignado'
     
@@ -470,6 +503,7 @@ class Terreno(modelsGis.Model):
     local_id = models.CharField(max_length=200, blank=True, null=True)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'terreno'
     def __str__(self):
@@ -483,6 +517,7 @@ class TerrenoZonas (models.Model):
     terreno = models.ForeignKey('Terreno', on_delete=models.RESTRICT)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'terreno_zonas'
 
@@ -501,6 +536,7 @@ class TramiteCatastral(models.Model):
 
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'tramite_catastral'
         indexes = [
@@ -519,6 +555,7 @@ class Unidadconstruccion(modelsGis.Model):
     local_id = models.CharField(max_length=200, blank=True, null=True)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'unidadconstruccion'
 
@@ -535,6 +572,7 @@ class EstructuraAvaluo(models.Model):
     vigencia = models.IntegerField(blank=True, null=True)
 
     class Meta:
+        managed =False
         ordering = ["id"]
         db_table = 'estructura_avaluo'
         indexes = [

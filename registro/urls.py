@@ -17,9 +17,14 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
+from registro.apps.login.views import (CustomTokenObtainPairView, VerifyAuthView, 
+                              LogoutView, VerifyAuthCalidadView)
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('catastro/', include('registro.apps.catastro.urls')),
+    path('api/token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/logout/', LogoutView.as_view(), name='logout'),
     #path('login/', include('apps.login.urls')),
     
 ]
