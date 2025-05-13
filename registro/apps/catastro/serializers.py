@@ -122,18 +122,24 @@ class PredioSerializer(serializers.ModelSerializer):
     interesado = serializers.SerializerMethodField()
     avaluo = serializers.SerializerMethodField()
     area_catastral_terreno = serializers.SerializerMethodField()
+    orip_matricula = serializers.SerializerMethodField()
 
     class Meta:
         model = Predio
         fields = [
             'id', 'numero_predial_nacional', 'codigo_homologado',
-            'departamento', 'municipio', 'matricula_inmobiliaria',
+            'departamento', 'municipio', 'orip_matricula',
             'condicion_predio', 'destinacion_economica',
             'area_catastral_terreno', 'vigencia_actualizacion_catastral',
             'estado', 'tipo', 'direccion', 'tipo_predio',
             'terreno_geo', 'terreno_alfa', 'unidades_construccion_geo', 'interesado',
             'avaluo'
         ]
+
+    def get_orip_matricula(self, obj):
+        if obj.codigo_orip and obj.matricula_inmobiliaria:
+            return f"{obj.codigo_orip}-{obj.matricula_inmobiliaria}"
+        return None
 
     def get_area_catastral_terreno(self, obj):
         if obj.area_catastral_terreno is not None:

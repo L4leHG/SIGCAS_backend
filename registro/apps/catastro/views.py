@@ -70,6 +70,7 @@ class PredioPreView(APIView):
             'npn': serializer.data.get('numero_predial_nacional'),
             'direccion': serializer.data.get('direccion'),
             'area total': serializer.data.get('area_catastral_terreno'),
+            'orip_matricula':serializer.data.get('orip_matricula'),
             'estado': serializer.data.get('estado'),
 
         }
