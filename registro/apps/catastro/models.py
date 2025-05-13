@@ -352,7 +352,7 @@ class Interesado(models.Model):
     segundo_apellido = models.CharField(max_length=100, blank=True, null=True)
     sexo = models.ForeignKey(CrSexotipo, on_delete=models.RESTRICT)
     autoreconocimientoetnico = models.ForeignKey('CrAutoreconocimientoetnicotipo', on_delete=models.RESTRICT, blank=True, null=True)
-    autoreconocimientocampesino = models.BooleanField(blank=True, null=True)
+    autoreconocimientocampesino = models.BooleanField(default=False)
     razon_social = models.CharField(max_length=255, blank=True, null=True)
     nombre = models.CharField(max_length=255, blank=True, null=True)
     tipo_interesado = models.ForeignKey('ColInteresadotipo', on_delete=models.RESTRICT, blank=True, null=True)
@@ -459,14 +459,19 @@ class PredioUnidadespacial(models.Model):
 class Radicado(models.Model):
     numero_radicado = models.CharField(max_length=30)
     fecha_radicado = models.DateField()
-    estado_radicado = models.ForeignKey('EstadoRadicado', on_delete=models.RESTRICT)
-
+    asignado = models.BooleanField(default=False)
+    oficio = models.BooleanField(default=False)
+    nombre_solicitante = models.CharField(max_length=255, blank=True, null=True)
+    tipo_interesado = models.ForeignKey('ColInteresadotipo', on_delete=models.RESTRICT, blank=True, null=True)
+    numero_documento = models.CharField(max_length=255, blank=True, null=True)
+    tipo_documento = models.ForeignKey('ColDocumentotipo', on_delete=models.RESTRICT,blank=True, null=True)
+    
     class Meta:
-        managed =True
+        managed = True
         ordering = ["id"]
         db_table = 'radicado'
         indexes = [
-            models.Index(fields=[ "id", "numero_radicado"]),
+            models.Index(fields=['numero_radicado','fecha_radicado','asignado','tipo_interesado','tipo_documento']),
         ]
     def __str__(self):
         return self.numero_radicado

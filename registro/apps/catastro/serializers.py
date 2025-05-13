@@ -2,7 +2,7 @@ from rest_framework import serializers
 from registro.apps.catastro.models import (
     Predio, CaracteristicasUnidadconstruccion, Unidadconstruccion, 
     Terreno, PredioUnidadespacial, CrCondicionprediotipo, TerrenoZonas, Interesado,InteresadoPredio,
-    EstructuraAvaluo
+    EstructuraAvaluo, Radicado, RadicadoPredioAsignado, EstadoAsignacion, CrMutaciontipo, ColDocumentotipo, ColInteresadotipo
 )
 
 class CaracteristicasUnidadconstruccionSerializer(serializers.ModelSerializer):
@@ -121,6 +121,7 @@ class PredioSerializer(serializers.ModelSerializer):
     tipo_predio = serializers.SerializerMethodField()
     interesado = serializers.SerializerMethodField()
     avaluo = serializers.SerializerMethodField()
+    area_catastral_terreno = serializers.SerializerMethodField()
 
     class Meta:
         model = Predio
@@ -133,6 +134,11 @@ class PredioSerializer(serializers.ModelSerializer):
             'terreno_geo', 'terreno_alfa', 'unidades_construccion_geo', 'interesado',
             'avaluo'
         ]
+
+    def get_area_catastral_terreno(self, obj):
+        if obj.area_catastral_terreno is not None:
+            return round(float(obj.area_catastral_terreno), 2)
+        return None
 
     def get_avaluo(self, obj):
         instance = EstructuraAvaluo.objects.filter(predio=obj).order_by('-fecha_avaluo')
@@ -200,3 +206,148 @@ class PredioSerializer(serializers.ModelSerializer):
         if obj.tipo_predio:
             return obj.tipo_predio.ilicode
         return None
+
+#### ******************************SERIALIZER PARA DOMINIOS
+
+#### ******************************SERIALIZER PARA RADICACION 
+class SerializerRadicado (serializers.Serializer):
+    pass
+
+# Serializer para Radicado
+class RadicadoSerializer(serializers.ModelSerializer):
+    tipo_documento = serializers.SerializerMethodField()
+    tipo_interesado = serializers.SerializerMethodField()
+    radicado_asignado = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Radicado
+        fields = ['id', 'numero_radicado', 'fecha_radicado', 'asignado',
+                 'oficio', 'nombre_solicitante', 'tipo_interesado_info',
+                 'numero_documento', 'tipo_documento_info', 'radicado_asignado']
+        read_only_fields = ('id',)
+
+    def get_tipo_documento(self, obj):
+        if obj.tipo_documento:
+            return {
+                'id': obj.tipo_documento.t_id,
+                'ilicode': obj.tipo_documento.ilicode,
+                'description': obj.tipo_documento.description
+            }
+        return None
+
+    def get_tipo_interesado(self, obj):
+        if obj.tipo_interesado:
+            return {
+                'id': obj.tipo_interesado.t_id,
+                'ilicode': obj.tipo_interesado.ilicode,
+                'description': obj.tipo_interesado.description
+            }
+        return None
+
+    def get_radicado_asignado(self, obj):
+        asignaciones = obj.radicadopredioasignado_set.all()
+        if asignaciones.exists():
+            return RadicadoPredioAsignadoSerializer(asignaciones, many=True).data
+        return None
+
+    def validate_numero_radicado(self, value):
+        if Radicado.objects.filter(numero_radicado=value).exists():
+            raise serializers.ValidationError(
+                "Ya existe un radicado con este número"
+            )
+        return value
+
+    def validate(self, data):
+        if data.get('tipo_documento') and not data.get('numero_documento'):
+            raise serializers.ValidationError(
+                "Si se especifica el tipo de documento, debe proporcionar el número de documento"
+            )
+        return data
+
+# Serializer para RadicadoPredioAsignado
+class RadicadoPredioAsignadoSerializer(serializers.ModelSerializer):
+    estado_asignacion = serializers.SerializerMethodField()
+    mutacion = serializers.SerializerMethodField()
+    usuario_analista = serializers.SerializerMethodField()
+    usuario_coordinador = serializers.SerializerMethodField()
+    predioo = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RadicadoPredioAsignado
+        fields = ['id', 'radicado', 'estado_asignacion_info', 'usuario_analista_info',
+                 'usuario_coordinador_info', 'mutacion_info', 'predio_info']
+        read_only_fields = ('id',)
+
+    def get_estado_asignacion(self, obj):
+        if obj.estado_asignacion:
+            return {
+                'id': obj.estado_asignacion.t_id,
+                'ilicode': obj.estado_asignacion.ilicode,
+                'description': obj.estado_asignacion.description
+            }
+        return None
+
+    def get_mutacion(self, obj):
+        if obj.mutacion:
+            return {
+                'id': obj.mutacion.t_id,
+                'ilicode': obj.mutacion.ilicode,
+                'description': obj.mutacion.description
+            }
+        return None
+
+    def get_usuario_analista(self, obj):
+        if obj.usuario_analista:
+            return {
+                'id': obj.usuario_analista.id,
+                'username': obj.usuario_analista.username,
+                'first_name': obj.usuario_analista.first_name,
+                'last_name': obj.usuario_analista.last_name
+            }
+        return None
+
+    def get_usuario_coordinador(self, obj):
+        if obj.usuario_coordinador:
+            return {
+                'id': obj.usuario_coordinador.id,
+                'username': obj.usuario_coordinador.username,
+                'first_name': obj.usuario_coordinador.first_name,
+                'last_name': obj.usuario_coordinador.last_name
+            }
+        return None
+
+    def get_predio(self, obj):
+        if obj.predio:
+            return {
+                'id': obj.predio.id,
+                'numero_predial_nacional': obj.predio.numero_predial_nacional,
+                'codigo_homologado': obj.predio.codigo_homologado,
+                'direccion': obj.predio.direccion
+            }
+        return None
+
+    def validate(self, data):
+        # Validar que el usuario analista pertenece al grupo correcto
+        if data.get('usuario_analista'):
+            if not data['usuario_analista'].groups.filter(name='Analista').exists():
+                raise serializers.ValidationError(
+                    "El usuario asignado debe ser un analista"
+                )
+        
+        # Validar que el usuario coordinador pertenece al grupo correcto
+        if data.get('usuario_coordinador'):
+            if not data['usuario_coordinador'].groups.filter(name='Coordinador').exists():
+                raise serializers.ValidationError(
+                    "El usuario asignado debe ser un coordinador"
+                )
+
+        # Validar que el radicado no esté ya asignado
+        if RadicadoPredioAsignado.objects.filter(
+            radicado=data.get('radicado'),
+            predio=data.get('predio')
+        ).exists():
+            raise serializers.ValidationError(
+                "Este predio ya está asignado a este radicado"
+            )
+                
+        return data
