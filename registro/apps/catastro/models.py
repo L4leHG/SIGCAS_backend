@@ -498,6 +498,7 @@ class Terreno(modelsGis.Model):
     fin_vida_util_version = models.DateField(auto_now=False,blank=True, null=True)
     geometria = modelsGis.MultiPolygonField(null=True, srid=9377)
     local_id = models.CharField(max_length=200, blank=True, null=True)
+    geom = modelsGis.MultiPolygonField(null=True, srid=4326)
 
     class Meta:
         managed =True
@@ -550,6 +551,7 @@ class Unidadconstruccion(modelsGis.Model):
     fin_vida_util = models.DateField(auto_now=False,blank=True, null=True)
     geometria = modelsGis.MultiPolygonField(null=True, srid=9377)
     local_id = models.CharField(max_length=200, blank=True, null=True)
+    geom = modelsGis.MultiPolygonField(null=True, srid=4326)
 
     class Meta:
         managed =True
