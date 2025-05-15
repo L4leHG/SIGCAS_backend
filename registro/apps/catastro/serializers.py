@@ -41,7 +41,6 @@ class UnidadConstruccionSerializer(GeoFeatureModelSerializer):
         ]
     
 
-    
 class CaracteristicasUnidadconstruccionAlfaSerializer(serializers.ModelSerializer):
     class Meta:
         model = CaracteristicasUnidadconstruccion
@@ -53,7 +52,7 @@ class TerrenoSerializer(GeoFeatureModelSerializer):
     class Meta:
         model = Terreno
         geo_field = "geom"
-        fields = ['id']
+        fields = ['id','local_id']
 
 class TerrenoAlfaSerializer(serializers.ModelSerializer):
     class Meta:
