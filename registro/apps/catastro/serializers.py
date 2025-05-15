@@ -4,6 +4,7 @@ from registro.apps.catastro.models import (
     Terreno, PredioUnidadespacial, CrCondicionprediotipo, TerrenoZonas, Interesado,InteresadoPredio,
     EstructuraAvaluo, Radicado, RadicadoPredioAsignado, EstadoAsignacion, CrMutaciontipo, ColDocumentotipo, ColInteresadotipo
 )
+from rest_framework_gis.serializers import GeoFeatureModelSerializer
 
 class CaracteristicasUnidadconstruccionSerializer(serializers.ModelSerializer):
     uso = serializers.SerializerMethodField()
@@ -28,15 +29,18 @@ class CaracteristicasUnidadconstruccionSerializer(serializers.ModelSerializer):
             return obj.tipo_unidad_construccion.ilicode
         return None
 
-class UnidadConstruccionSerializer(serializers.ModelSerializer):
+class UnidadConstruccionSerializer(GeoFeatureModelSerializer):
     caracteristicas_unidadconstruccion = CaracteristicasUnidadconstruccionSerializer()
-
+    
     class Meta:
         model = Unidadconstruccion
+        geo_field = "geom"
         fields = [
-            'planta_ubicacion', 'altura', 'caracteristicas_unidadconstruccion',
-            'geometria'
+            'planta_ubicacion', 'altura', 'caracteristicas_unidadconstruccion'
+          
         ]
+    
+
     
 class CaracteristicasUnidadconstruccionAlfaSerializer(serializers.ModelSerializer):
     class Meta:
@@ -44,12 +48,13 @@ class CaracteristicasUnidadconstruccionAlfaSerializer(serializers.ModelSerialize
         fields = ['identificador']
 
 
-class TerrenoSerializer(serializers.ModelSerializer):
+class TerrenoSerializer(GeoFeatureModelSerializer):
+  
     class Meta:
         model = Terreno
-        fields = ['geometria']
+        geo_field = "geom"
+        fields = ['id']
 
-    
 class TerrenoAlfaSerializer(serializers.ModelSerializer):
     class Meta:
         model = TerrenoZonas
@@ -57,7 +62,6 @@ class TerrenoAlfaSerializer(serializers.ModelSerializer):
 
 
 class PredioUnidadespacialSerializer(serializers.ModelSerializer):
-
     terreno = TerrenoSerializer()
     unidadconstruccion = UnidadConstruccionSerializer()
 
