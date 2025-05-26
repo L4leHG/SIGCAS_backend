@@ -7,18 +7,40 @@ from rest_framework import status, generics
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError, APIException
 from rest_framework.decorators import action
+from rest_framework import serializers
+from django.db.models import Q
 
 from registro.apps.catastro import models
 from registro.apps.catastro.models import (
-    Predio, Radicado, RadicadoPredioAsignado, 
-    EstadoAsignacion, CrMutaciontipo, 
-    ColDocumentotipo, ColInteresadotipo
+    Predio, Radicado,
+    ColDocumentotipo, ColInteresadotipo,
+    #####***************************************************************DOMINIOS
+    #GRUPO PREDIO
+    CrPrediotipo, CrCondicionprediotipo, CrDestinacioneconomicatipo, CrEstadotipo,
+    # INTERESADO
+    ColDocumentotipo, CrAutoreconocimientoetnicotipo, ColInteresadotipo,
+    # GRUPO FUENTE ADMINISTRATIVA
+    ColFuenteadministrativatipo, ColEstadodisponibilidadtipo, EnteEmisortipo,
+    # GRUPO UNIDAD CONSTRUCCIÓN
+    CrUnidadconstrucciontipo, CrUsouconstipo, CrConstruccionplantatipo,
+    #INDIVIDUALES
+    ColUnidadadministrativabasicatipo,EstadoAsignacion,CrMutaciontipo, User
+    #####***************************************************************
 )
 from .serializers import (
-    PredioSerializer, RadicadoSerializer, 
-    RadicadoPredioAsignadoSerializer, 
-    SerializerRadicado
+    PredioSerializer, 
+    SerializerRadicado,
+    #####DOMINIOS
+    CrPrediotipoSerializer, CrCondicionprediotipoSerializer, CrDestinacioneconomicatipoSerializer, CrEstadotipoSerializer,
+    ColDocumentotipoSerializer, CrAutoreconocimientoetnicotipoSerializer, ColInteresadotipoSerializer,
+    ColFuenteadministrativatipoSerializer, ColEstadodisponibilidadtipoSerializer, EnteEmisortipoSerializer,
+    CrUnidadconstrucciontipoSerializer, CrUsouconstipoSerializer, CrConstruccionplantatipoSerializer,
+    ColUnidadadministrativabasicatipoSerializer,
+    EstadoAsignacionSerializer, CrMutaciontipoSerializer, RadicadoListSerializer,
+    RadicadoPredioAsignadoEditSerializer, UserSerializer, RadicadoPredioAsignadoSerializer
 )
+
+from registro.apps.catastro.models import RadicadoPredioAsignado
 from registro.apps.utils.middleware.CookiesJWTAuthentication import CookieJWTAuthentication
 from registro.apps.utils.permission.permission import IsConsultaAmindUser
 
@@ -27,24 +49,8 @@ import copy
 
 logger = logging.getLogger(__name__)
 
-# Create your views here.
-
-class SaludoCatastroView(View):
-    def get(self, request, *args, **kwargs):
-        return HttpResponse("saludos desde catastro")
-
     
-class PredioListView(View):
-    def get(self, request):
-        predios = models.Predio.objects.all().values(
-        
-            'numero_predial_nacional',
-            'codigo_homologado',
-            'direccion'
-        )[:100]  # Limita a 100 resultados si es muy grande
-        return JsonResponse(list(predios), safe=False)
-    
-
+# --- ********************************* VIEWS PARA PREDIO ********************************* ---
 class PredioPreView(APIView):
     def get(self, request):
         numero_predial = request.query_params.get('numero_predial_nacional')
@@ -97,47 +103,208 @@ class PredioDetalleAPIView(APIView):
         serializer = PredioSerializer(predio)
         return Response(serializer.data)
 
+#### ********************************* VIEWS PARA DOMINIOS *********************************
 
-#### ******************************VIEWS PARA RADICACION 
+# --- DOMINIOS DE PREDIO ---
+class DominiosPredioView(APIView):
+    def get(self, request):
+        return Response({
+            "tipo": CrPrediotipoSerializer(CrPrediotipo.objects.all(), many=True).data,
+            "condicion": CrCondicionprediotipoSerializer(CrCondicionprediotipo.objects.all(), many=True).data,
+            "destino_economico": CrDestinacioneconomicatipoSerializer(CrDestinacioneconomicatipo.objects.all(), many=True).data,
+            "estado": CrEstadotipoSerializer(CrEstadotipo.objects.all(), many=True).data,
+        })
+
+
+# --- DOMINIOS DE INTERESADO ---
+class DominiosInteresadoView(APIView):
+    def get(self, request):
+        return Response({
+            "documento_tipo": ColDocumentotipoSerializer(ColDocumentotipo.objects.all(), many=True).data,
+            "etnia": CrAutoreconocimientoetnicotipoSerializer(CrAutoreconocimientoetnicotipo.objects.all(), many=True).data,
+            "tipo_interesado": ColInteresadotipoSerializer(ColInteresadotipo.objects.all(), many=True).data,
+        })
+
+
+# --- DOMINIOS DE FUENTE ADMINISTRATIVA ---
+class DominiosFuenteAdministrativaView(APIView):
+    def get(self, request):
+        return Response({
+            "fuente": ColFuenteadministrativatipoSerializer(ColFuenteadministrativatipo.objects.all(), many=True).data,
+            "estado_disponibilidad": ColEstadodisponibilidadtipoSerializer(ColEstadodisponibilidadtipo.objects.all(), many=True).data,
+            "ente_emisor": EnteEmisortipoSerializer(EnteEmisortipo.objects.all(), many=True).data,
+        })
+
+
+# --- DOMINIOS DE UNIDAD DE CONSTRUCCIÓN ---
+class DominiosUnidadConstruccionView(APIView):
+    def get(self, request):
+        return Response({
+            "unidad_tipo": CrUnidadconstrucciontipoSerializer(CrUnidadconstrucciontipo.objects.all(), many=True).data,
+            "uso_construccion": CrUsouconstipoSerializer(CrUsouconstipo.objects.all(), many=True).data,
+            "planta_tipo": CrConstruccionplantatipoSerializer(CrConstruccionplantatipo.objects.all(), many=True).data,
+        })
+
+
+# --- DOMINIO: Unidad Administrativa Básica ---
+class UnidadAdministrativaBasicaTipoView(APIView):
+    def get(self, request):
+        data = ColUnidadadministrativabasicatipoSerializer(ColUnidadadministrativabasicatipo.objects.all(), many=True).data
+        return Response(data)
+
+
+# --- DOMINIO: Estado de Asignación ---
+class EstadoAsignacionView(APIView):
+    def get(self, request):
+        data = EstadoAsignacionSerializer(EstadoAsignacion.objects.all(), many=True).data
+        return Response(data)
+
+
+# --- DOMINIO: Tipo de Mutación ---
+class MutacionTipoView(APIView):
+    def get(self, request):
+        data = CrMutaciontipoSerializer(CrMutaciontipo.objects.all(), many=True).data
+        return Response(data)
+    
+# --- DOMINIO: Usuario ---
+class UserListView(generics.ListAPIView):
+    serializer_class = UserSerializer
+    permission_classes = [IsConsultaAmindUser]
+    authentication_classes = [CookieJWTAuthentication]
+
+    def get_queryset(self):
+        # Solo obtenemos los campos necesarios para el desplegable
+        queryset = User.objects.filter(
+            is_active=True
+        ).only(
+            'id', 
+            'username', 
+            'first_name', 
+            'last_name', 
+            'email'
+        ).order_by('first_name', 'last_name')
+
+        # Filtro opcional por nombre o apellido
+        search = self.request.query_params.get('search', '')
+        if search:
+            queryset = queryset.filter(
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(username__icontains=search)
+            )
+
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        try:
+            queryset = self.get_queryset()
+            serializer = self.get_serializer(queryset, many=True)
+            return Response({
+                'results': serializer.data,
+                'count': queryset.count()
+            })
+        except Exception as e:
+            return Response(
+                {"error": "Ocurrió un error al procesar la solicitud"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    
+
+    
+#### ********************************* VIEWS PARA RADICACION *********************************
 
 class RadicadoView(generics.CreateAPIView):
     serializer_class = SerializerRadicado
     permission_classes = [IsConsultaAmindUser]
     authentication_classes = [CookieJWTAuthentication]
 
-    def create (self, request): 
-        request_user=copy.copy(request.data)
-        print(request.user.email)
-        tipo_documento_user = request_user.get('tipo_documento')
-        tipo_interesado_user = request_user.get('tipo_interesado')
-        numero_radicado_user = request_user.get('numero_radicado')
-        fecha_radicado_user = request_user.get('fecha_radicado')
-        nombre_solicitante_user = request_user.get('nombre_solicitante')
-        numero_documento_user = request_user.get ('numero_documento')
-        oficio_user = request_user.get ('oficio')
+    def create(self, request, *args, **kwargs):
+        try:
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        except serializers.ValidationError as e:
+            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response(
+                {"error": "Ocurrió un error al procesar la solicitud"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-        instance_tipo_documento= ColDocumentotipo.objects.get(ilicode = tipo_documento_user)
-        instance_tipo_interesado = ColInteresadotipo.objects.get(ilicode = tipo_interesado_user)
-
-
-        # request_user['tipo_interesado'] = instance_tipo_interesado
-
-       
-        Radicado.objects.create( 
-            tipo_documento = instance_tipo_documento,
-            tipo_interesado = instance_tipo_interesado,
-            numero_radicado=numero_radicado_user, 
-            fecha_radicado = fecha_radicado_user,
-            nombre_solicitante = nombre_solicitante_user,
-            numero_documento = numero_documento_user,
-            oficio = oficio_user
-              )
-        
-        return Response({
-            'data':tipo_documento_user
-        })
-    
+    def perform_create(self, serializer):
+        print("Usuario autenticado:", self.request.user.email)
+        serializer.save()
 
     
-      
+class RadicadoUpdateView(generics.UpdateAPIView):
+    queryset = Radicado.objects.all()
+    serializer_class = SerializerRadicado
+    permission_classes = [IsConsultaAmindUser]
+    authentication_classes = [CookieJWTAuthentication]
+    lookup_field = 'id'  # o 'pk' si prefieres  
 
+class RadicadoListView(generics.ListAPIView):
+    serializer_class = RadicadoListSerializer
+    permission_classes = [IsConsultaAmindUser]
+    authentication_classes = [CookieJWTAuthentication]
+
+    def get_queryset(self):
+        queryset = Radicado.objects.all()
+        numero_radicado = self.request.query_params.get('numero_radicado')
+        # estado = self.request.query_params.get('estado')
+
+        if numero_radicado:
+            queryset = queryset.filter(numero_radicado=numero_radicado)
+            if not queryset.exists():
+                raise ValidationError({
+                    "error": f"No se encontró ningún radicado con el número {numero_radicado}"
+                })
+
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        try:
+            queryset = self.get_queryset()
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data)
+        except ValidationError as e:
+            return Response(e.detail, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response(
+                {"error": "Ocurrió un error al procesar la solicitud"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+#### ********************************* VIEWS PARA ASIGNACION DE RADICADO A PREDIO *********************************
+
+class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
+    serializer_class = RadicadoPredioAsignadoEditSerializer
+    permission_classes = [IsConsultaAmindUser]
+    authentication_classes = [CookieJWTAuthentication]
+
+    def create(self, request, *args, **kwargs):
+        try:
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            instance = self.perform_create(serializer)
+            response_serializer = RadicadoPredioAsignadoSerializer(instance)
+            return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+        except ValidationError as e:
+            return Response(e.detail, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error al crear asignación: {str(e)}")
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def perform_create(self, serializer):
+        return serializer.save()
+
+class RadicadoPredioAsignadoUpdateView(generics.UpdateAPIView):
+    queryset = RadicadoPredioAsignado.objects.all()
+    serializer_class = RadicadoPredioAsignadoEditSerializer
+    permission_classes = [IsConsultaAmindUser]
+    authentication_classes = [CookieJWTAuthentication]
+    lookup_field = 'id'  # o 'pk' si prefieres  
