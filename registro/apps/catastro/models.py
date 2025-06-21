@@ -452,6 +452,7 @@ class PredioUnidadespacial(models.Model):
         managed =True
         ordering = ["id"]
         db_table = 'predio_unidadespacial'
+
     def __str__(self):
         return str(self.id)        
 
@@ -580,3 +581,22 @@ class EstructuraAvaluo(models.Model):
 
     def __str__(self):
         return str(self.id)
+    
+class Historial_predio(models.Model):
+    predio=models.ForeignKey(Predio, on_delete=models.RESTRICT,null=True)
+    interesado_predio=models.ForeignKey(InteresadoPredio, on_delete=models.RESTRICT, null=True)
+    # predio_fuenteadministrativa=models.ForeignKey(PredioFuenteadministrativa, on_delete=models.RESTRICT, null=True)
+    predio_unidadespacial=models.ForeignKey(PredioUnidadespacial,on_delete=models.RESTRICT,null=True)
+    predio_tramitecatastral=models.ForeignKey(PredioTramitecatastral,on_delete=models.RESTRICT, null=True)
+
+    class Meta:
+        managed=True
+        ordering=['id']
+        db_table = 'historial_predio'
+        indexes=[
+            models.Index(fields=['predio']),
+        ]
+    
+    def __str__(self):
+        return str(self.id)
+    

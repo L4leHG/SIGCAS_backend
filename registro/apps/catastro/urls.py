@@ -4,6 +4,8 @@ from .views import (
      PredioDetalleAPIView, PredioPreView,
     RadicadoView, RadicadoUpdateView, RadicadoListView,
     RadicadoPredioAsignadoCreateView, RadicadoPredioAsignadoUpdateView, UserListView,
+    RadicadoPredioAsignadoListView, RadicadoPredioAsignadoDeleteView,
+    RadicadoDeleteView, RadicadoPredioAsignadoUpdateView, RadicadoPredioAsignadoListView,RadicadoPredioAsignadoCreateView,
  ######******DOMINIOS
     DominiosPredioView, DominiosInteresadoView, DominiosFuenteAdministrativaView, DominiosUnidadConstruccionView,
     UnidadAdministrativaBasicaTipoView, EstadoAsignacionView, MutacionTipoView,
@@ -25,15 +27,20 @@ urlpatterns = [
     path('api/radicado/<int:id>/editar/', RadicadoUpdateView.as_view(), name='editar_radicado'),
     ##Lista Radicados y detalle de un radicado
     path('api/radicado/lista/', RadicadoListView.as_view(), name='listar_radicados'),
+    ##Eliminar radicado 
+    path('api/radicado/<int:id>/eliminar/', RadicadoDeleteView.as_view(), name='eliminar_radicado'),
+     
+     ###############***********ENDPOINTS DE RADICADO ASIGNACION
     ##Crear asignación de radicado a predio
     path('api/radicado/asignar/', RadicadoPredioAsignadoCreateView.as_view(), name='asignar_radicado'),
     ##Editar asignación de radicado a predio
     path('api/radicado/editar_asignacion/<int:id>/', RadicadoPredioAsignadoUpdateView.as_view(), name='editar_asignacion_radicado'),
+    ##Listar asignaciones de radicado a predio
+    path('api/radicado/asignacion/lista/', RadicadoPredioAsignadoListView.as_view(), name='listar_asignaciones_radicado'),
+    ##Eliminar asignación de radicado a predio
+    path('api/radicado/asignacion/<int:id>/eliminar/', RadicadoPredioAsignadoDeleteView.as_view(), name='eliminar_asignacion_radicado'),
     ##Detalle de un radicado
-    # path('api/radicado/detalle/<int:id>/', RadicadoDetailView.as_view(), name='detalle_radicado'),
-
-    
-    
+    # path('api/radicado/detalle/<int:id>/', RadicadoDetailView.as_view(), name='detalle_radicado'), 
 
     ###############***********ENDPOINTS DE USUARIOS
     path('api/usuarios/', UserListView.as_view(), name='listar_usuarios'),

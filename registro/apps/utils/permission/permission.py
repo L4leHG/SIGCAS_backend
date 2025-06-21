@@ -98,3 +98,31 @@ class IsEdicionMutacionAmindUser(permissions.BasePermission):
             if instance_rol_predio.exists():
                 return True
         return False
+
+class IsRadicadoListViewUser(permissions.BasePermission):
+    """
+    Permite acceso a la lista de radicados basado en el rol del usuario:
+    - Admin: puede ver todos los radicados
+    - Analista: solo puede ver los radicados asignados a él
+    """
+    def has_permission(self, request, view):
+        if request.user and request.user.is_active and request.user.is_verified:
+            # Verificar si el usuario es admin
+            instance_rol_predio = Rol_predio.objects.filter(
+                user=request.user, 
+                rol__name__in=('Admin',), 
+                is_activate=True
+            )
+            if instance_rol_predio.exists():
+                return True
+            
+            # Verificar si el usuario es analista
+            instance_rol_predio = Rol_predio.objects.filter(
+                user=request.user, 
+                rol__name__in=('Analista',), 
+                is_activate=True
+            )
+            if instance_rol_predio.exists():
+                return True
+                
+        return False

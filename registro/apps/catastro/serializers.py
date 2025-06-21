@@ -27,6 +27,11 @@ from registro.apps.catastro.models import (
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
 import re
 import logging
+from django.template.loader import render_to_string
+from django.http import HttpResponse
+from weasyprint import HTML
+from datetime import datetime
+from rest_framework.exceptions import ValidationError, APIException
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +66,7 @@ class UnidadConstruccionSerializer(GeoFeatureModelSerializer):
         geo_field = "geom"
         fields = [
             'planta_ubicacion', 'altura', 'caracteristicas_unidadconstruccion'
-          
         ]
-    
-
 class CaracteristicasUnidadconstruccionAlfaSerializer(serializers.ModelSerializer):
     class Meta:
         model = CaracteristicasUnidadconstruccion
@@ -162,6 +164,89 @@ class PredioSerializer(serializers.ModelSerializer):
             'terreno_geo', 'terreno_alfa', 'unidades_construccion_geo', 'interesado',
             'avaluo'
         ]
+
+    def generate_pdf(self, data, numero_predial):
+        """
+        Genera un PDF con la información del predio.
+        
+        Args:
+            data (dict): Datos serializados del predio
+            numero_predial (str): Número predial del predio
+            
+        Returns:
+            HttpResponse: Respuesta HTTP con el PDF generado
+        """
+        try:
+            # Validar datos críticos
+            if not data or not numero_predial:
+                raise ValueError("Datos del predio o número predial no proporcionados")
+
+            # Configuración del PDF
+            pdf_options = {
+                'page-size': 'A4',
+                'margin-top': '2cm',
+                'margin-right': '2cm',
+                'margin-bottom': '2cm',
+                'margin-left': '2cm',
+                'encoding': 'UTF-8',
+            }
+
+            # Preparar metadatos
+            metadata = {
+                'title': f'Información del Predio {numero_predial}',
+                'author': 'Sistema de Catastro',
+                'creation_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            }
+
+            # Organizar datos para el template
+            template_data = {
+                'predio': data,
+                'fecha_generacion': datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
+                'metadata': metadata,
+                'departamento': data.get('departamento'),
+                'municipio': data.get('municipio'),
+                'direccion': data.get('direccion'),
+                'area_total': data.get('area_catastral_terreno'),
+                'estado': data.get('estado'),
+                'tipo_predio': data.get('tipo_predio'),
+                'condicion': data.get('condicion_predio'),
+                'destinacion': data.get('destinacion_economica'),
+                'interesados': data.get('interesado', []),
+                'avaluos': data.get('avaluo', []),
+                'terrenos': data.get('terreno_geo', []),
+                'construcciones': data.get('unidades_construccion_geo', [])
+            }
+
+            # Renderizar template
+            html_string = render_to_string(
+                'catastro/predio_pdf.html',
+                template_data
+            )
+
+            # Generar PDF con configuración
+            html = HTML(string=html_string)
+            pdf = html.write_pdf(
+                stylesheets=[],
+                **pdf_options
+            )
+
+            # Crear respuesta HTTP
+            response = HttpResponse(pdf, content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="predio_{numero_predial}.pdf"'
+            
+            # Agregar metadatos a la respuesta
+            response['X-PDF-Title'] = metadata['title']
+            response['X-PDF-Author'] = metadata['author']
+            response['X-PDF-Creation-Date'] = metadata['creation_date']
+
+            return response
+
+        except ValueError as ve:
+            logger.error(f"Error de validación al generar PDF: {str(ve)}")
+            raise ValidationError(str(ve))
+        except Exception as e:
+            logger.error(f"Error al generar PDF: {str(e)}", exc_info=True)
+            raise APIException("Error al generar el PDF del predio")
 
     def get_orip_matricula(self, obj):
         if obj.codigo_orip and obj.matricula_inmobiliaria:
@@ -466,7 +551,9 @@ class SerializerRadicado(serializers.Serializer):
 #### ******************************SERIALIZER ASIGNAR RADICACION A PREDIO
 
 class RadicadoPredioAsignadoSerializer(serializers.ModelSerializer):
+    radicado_id= serializers.SerializerMethodField()
     numero_radicado = serializers.SerializerMethodField()
+    predio_id = serializers.SerializerMethodField()
     numero_predial_nacional = serializers.SerializerMethodField()
     estado_asignacion = serializers.SerializerMethodField()
     mutacion = serializers.SerializerMethodField()
@@ -476,14 +563,20 @@ class RadicadoPredioAsignadoSerializer(serializers.ModelSerializer):
     class Meta:
         model = RadicadoPredioAsignado
         fields = [
-            'id', 'numero_radicado', 'numero_predial_nacional',
+            'id', 'radicado_id', 'numero_radicado', 'predio_id', 'numero_predial_nacional',
             'estado_asignacion', 'mutacion', 'usuario_analista',
             'usuario_coordinador'
         ]
+    
+    def get_radicado_id(self, obj):
+        return obj.radicado.id if obj.radicado else None
 
     def get_numero_radicado(self, obj):
         return obj.radicado.numero_radicado if obj.radicado else None
-
+    
+    def get_predio_id(self, obj):
+        return obj.predio.id if obj.predio else None
+    
     def get_numero_predial_nacional(self, obj):
         return obj.predio.numero_predial_nacional if obj.predio else None
 
@@ -529,8 +622,6 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
             
             return None
         except Exception as e:
-            logger.error(f"Error al buscar usuario por nombre completo: {str(e)}")
-            logger.error(f"Nombre completo buscado: {full_name}")
             raise serializers.ValidationError(f"Error al buscar usuario: {str(e)}")
 
     def validate(self, data):
@@ -547,7 +638,7 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
         except Exception as e:
             raise serializers.ValidationError(str(e))
 
-        # Validar que el predio exista por NPN y esté en estado 1
+        # Validar que el predio exista por NPN y esté en estado activo
         try:
             predio = Predio.objects.filter(
                 numero_predial_nacional=data['numero_predial_nacional'],
@@ -575,19 +666,29 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
             usuario_analista = self._get_user_full_name(data['usuario_analista'])
             if not usuario_analista:
                 raise serializers.ValidationError("No se encontró un usuario analista con ese nombre.")
-            # Guardar el usuario encontrado para usarlo en create
             self.validated_analista = usuario_analista
 
         if data.get('usuario_coordinador'):
             usuario_coordinador = self._get_user_full_name(data['usuario_coordinador'])
             if not usuario_coordinador:
                 raise serializers.ValidationError("No se encontró un usuario coordinador con ese nombre.")
-            # Guardar el usuario encontrado para usarlo en create
             self.validated_coordinador = usuario_coordinador
+
+        # Validar que no exista una asignación previa para este radicado y predio
+        if not self.instance:  # Solo validar en creación
+            if RadicadoPredioAsignado.objects.filter(
+                radicado=radicado,
+                predio=predio
+            ).exists():
+                raise serializers.ValidationError(
+                    "Ya existe una asignación para este radicado y predio."
+                )
 
         # Guardar el radicado y predio validados
         self.validated_radicado = radicado
         self.validated_predio = predio
+        self.validated_estado = estado
+        self.validated_mutacion = mutacion
 
         return data
 
@@ -595,10 +696,8 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
         # Usar el radicado y predio ya validados
         radicado = self.validated_radicado
         predio = self.validated_predio
-        
-        # Obtener las instancias de los modelos relacionados
-        estado = EstadoAsignacion.objects.get(ilicode=validated_data.get('estado_asignacion', 'Pendiente'))
-        mutacion = CrMutaciontipo.objects.get(ilicode=validated_data['mutacion'])
+        estado = self.validated_estado
+        mutacion = self.validated_mutacion
         
         # Usar los usuarios ya validados
         usuario_analista = getattr(self, 'validated_analista', None)
@@ -614,13 +713,27 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
             usuario_coordinador=usuario_coordinador
         )
 
+        # Actualizar el estado de asignación del radicado
+        radicado.asignado = True
+        radicado.save()
+
         return asignacion
     
     def update(self, instance, validated_data):
-        instance.estado_asignacion = validated_data.get('estado_asignacion', instance.estado_asignacion)
-        instance.mutacion = validated_data.get('mutacion', instance.mutacion)
-        instance.usuario_analista = validated_data.get('usuario_analista', instance.usuario_analista)
-        instance.usuario_coordinador = validated_data.get('usuario_coordinador', instance.usuario_coordinador)
-        instance.numero_predial_nacional = validated_data.get('numero_predial_nacional', instance.numero_predial_nacional)  
+        # Actualizar estado de asignación
+        if 'estado_asignacion' in validated_data:
+            instance.estado_asignacion = self.validated_estado
+
+        # Actualizar mutación
+        if 'mutacion' in validated_data:
+            instance.mutacion = self.validated_mutacion
+
+        # Actualizar usuarios
+        if 'usuario_analista' in validated_data:
+            instance.usuario_analista = getattr(self, 'validated_analista', None)
+        
+        if 'usuario_coordinador' in validated_data:
+            instance.usuario_coordinador = getattr(self, 'validated_coordinador', None)
+
         instance.save()
         return instance

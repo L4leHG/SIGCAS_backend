@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Información del Predio</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 9pt;
+            line-height: 1.2;
+            margin: 0;
+            padding: 0;
+            color: #333;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #2c3e50;
+            padding-bottom: 10px;
+        }
+        .header h1 {
+            font-size: 16pt;
+            margin: 0 0 5px 0;
+            color: #2c3e50;
+        }
+        .header p {
+            font-size: 11pt;
+            margin: 0;
+            color: #34495e;
+        }
+        .section {
+            margin-bottom: 12px;
+            page-break-inside: avoid;
+        }
+        .section-title {
+            background-color: #2c3e50;
+            color: white;
+            padding: 5px;
+            margin-bottom: 8px;
+            font-weight: bold;
+            font-size: 11pt;
+            border-radius: 3px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+            font-size: 9pt;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        th, td {
+            border: 0.5px solid #ddd;
+            padding: 4px;
+            text-align: left;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 8pt;
+            color: #666;
+            border-top: 1px solid #ddd;
+            padding-top: 10px;
+        }
+        .nested-table {
+            margin: 0;
+            border: none;
+            box-shadow: none;
+        }
+        .nested-table th, .nested-table td {
+            border: none;
+            padding: 2px 4px;
+        }
+        .info-basica td {
+            width: 50%;
+        }
+        .terreno-info td, .construccion-info td {
+            width: 25%;
+        }
+        .section + .section {
+            margin-top: 8px;
+        }
+        .no-data {
+            color: #666;
+            font-style: italic;
+            text-align: center;
+            padding: 10px;
+        }
+        .valor-monetario {
+            text-align: right;
+        }
+        .valor-numerico {
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Información del Predio</h1>
+        <p>Número Predial Nacional: {{ predio.numero_predial_nacional|default:"No disponible" }}</p>
+    </div>
+
+    <!-- Información Básica -->
+    <div class="section">
+        <div class="section-title">Información Básica</div>
+        <table class="info-basica">
+            <tr>
+                <td><strong>Dirección:</strong> {{ predio.direccion|default:"No disponible" }}</td>
+                <td><strong>Departamento:</strong> {{ predio.departamento|default:"No disponible" }}</td>
+            </tr>
+            <tr>
+                <td><strong>Municipio:</strong> {{ predio.municipio|default:"No disponible" }}</td>
+                <td><strong>Estado:</strong> {{ predio.estado|default:"No disponible" }}</td>
+            </tr>
+            <tr>
+                <td><strong>Tipo de Predio:</strong> {{ predio.tipo_predio|default:"No disponible" }}</td>
+                <td><strong>Matricula inmobiliaria:</strong> {{ predio.orip_matricula|default:"No disponible" }}</td>
+            </tr>
+        </table>
+    </div>
+
+    <!-- Características del Terreno -->
+    <div class="section">
+        <div class="section-title">Información del Terreno</div>
+        {% if predio.terreno_alfa %}
+        <table class="terreno-info">
+            <tr>
+                <th>Área Catastral</th>
+                <th>Avalúo</th>
+                <th>Zona Física</th>
+                <th>Zona Geoeconómica</th>
+            </tr>
+            {% for terreno in predio.terreno_alfa %}
+            <tr>
+                <td class="valor-numerico">{{ terreno.area_catastral_terreno|default:"0"|floatformat:2 }} m²</td>
+                <td class="valor-monetario">${{ terreno.avaluo_terreno|default:"0"|floatformat:2 }}</td>
+                <td>{{ terreno.zona_fisica|default:"No especificado" }}</td>
+                <td>{{ terreno.zona_geoeconomica|default:"No especificado" }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p class="no-data">No hay información de terreno disponible</p>
+        {% endif %}
+    </div>
+
+    <!-- Unidades de Construcción -->
+    <div class="section">
+        <div class="section-title">Información de las Unidades de Construcción</div>
+        {% if predio.unidades_construccion_geo and predio.unidades_construccion_geo.features %}
+        <table class="construccion-info">
+            <tr>
+                <th>Planta</th>
+                <th>Altura</th>
+                <th>Uso</th>
+                <th>Área</th>
+            </tr>
+            {% for feature in predio.unidades_construccion_geo.features %}
+            <tr>
+                <td>{{ feature.properties.planta_ubicacion|default:"No especificado" }}</td>
+                <td>{{ feature.properties.altura|default:"No especificado" }}</td>
+                <td>{{ feature.properties.caracteristicas_unidadconstruccion.uso|default:"No especificado" }}</td>
+                <td class="valor-numerico">{{ feature.properties.caracteristicas_unidadconstruccion.area_construida|default:"0"|floatformat:2 }} m²</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p class="no-data">No hay información de unidades de construcción disponible</p>
+        {% endif %}
+    </div>
+
+    <!-- Avalúos -->
+    <div class="section">
+        <div class="section-title">Historial de Avalúos</div>
+        {% if predio.avaluo %}
+        <table>
+            <tr>
+                <th>Fecha</th>
+                <th>Avalúo Catastral</th>
+                <th>Vigencia</th>
+            </tr>
+            {% for avaluo in predio.avaluo %}
+            <tr>
+                <td>{{ avaluo.fecha_avaluo|date:"d/m/Y"|default:"No especificado" }}</td>
+                <td class="valor-monetario">${{ avaluo.avaluo_catastral|default:"0"|floatformat:2 }}</td>
+                <td>{{ avaluo.vigencia|default:"No especificado" }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p class="no-data">No hay historial de avalúos disponible</p>
+        {% endif %}
+    </div>
+
+    <!-- Interesados -->
+    <div class="section">
+        <div class="section-title">Interesados</div>
+        {% if predio.interesado %}
+        <table>
+            <tr>
+                <th>Tipo</th>
+                <th>Nombre/Razón Social</th>
+                <th>Documento</th>
+            </tr>
+            {% for interesado in predio.interesado %}
+            <tr>
+                <td>{{ interesado.tipo_interesado|default:"No especificado" }}</td>
+                <td>
+                    {% if interesado.tipo_interesado == 'Persona_Natural' %}
+                        {{ interesado.primer_nombre|default:"" }} {{ interesado.segundo_nombre|default:"" }} {{ interesado.primer_apellido|default:"" }} {{ interesado.segundo_apellido|default:"" }}
+                    {% else %}
+                        {{ interesado.razon_social|default:"No especificado" }}
+                    {% endif %}
+                </td>
+                <td>{{ interesado.numero_documento|default:"No especificado" }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p class="no-data">No hay información de interesados disponible</p>
+        {% endif %}
+    </div>
+
+    <div class="footer">
+        <p>Documento generado el {{ fecha_generacion|date:"d/m/Y H:i:s" }}</p>
+    </div>
+</body>
+</html> 
