@@ -6,6 +6,7 @@ from .views import (
     RadicadoPredioAsignadoCreateView, RadicadoPredioAsignadoUpdateView, UserListView,
     RadicadoPredioAsignadoListView, RadicadoPredioAsignadoDeleteView,
     RadicadoDeleteView, RadicadoPredioAsignadoUpdateView, RadicadoPredioAsignadoListView,RadicadoPredioAsignadoCreateView,
+    ProcesarMutacionView, ConsultarEstadoMutacionView, VerificarTransaccionalidadView,
  ######******DOMINIOS
     DominiosPredioView, DominiosInteresadoView, DominiosFuenteAdministrativaView, DominiosUnidadConstruccionView,
     UnidadAdministrativaBasicaTipoView, EstadoAsignacionView, MutacionTipoView,
@@ -41,6 +42,14 @@ urlpatterns = [
     path('api/radicado/asignacion/<int:id>/eliminar/', RadicadoPredioAsignadoDeleteView.as_view(), name='eliminar_asignacion_radicado'),
     ##Detalle de un radicado
     # path('api/radicado/detalle/<int:id>/', RadicadoDetailView.as_view(), name='detalle_radicado'), 
+
+    ###############***********ENDPOINTS DE MUTACIONES
+    ##Procesar mutación catastral
+    path('api/mutacion/procesar/', ProcesarMutacionView.as_view(), name='procesar_mutacion'),
+    ##Consultar estado de mutación
+    path('api/mutacion/estado/<int:asignacion_id>/', ConsultarEstadoMutacionView.as_view(), name='consultar_estado_mutacion'),
+    ##Verificar transaccionalidad (DEBUG)
+    path('api/mutacion/verificar-transaccion/', VerificarTransaccionalidadView.as_view(), name='verificar_transaccionalidad'),
 
     ###############***********ENDPOINTS DE USUARIOS
     path('api/usuarios/', UserListView.as_view(), name='listar_usuarios'),

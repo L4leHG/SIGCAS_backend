@@ -737,3 +737,85 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
 
         instance.save()
         return instance
+
+class MutacionRadicadoValidationSerializer(serializers.Serializer):
+    """
+    Serializer para validar radicado y asignación antes de procesar mutaciones.
+    Valida que:
+    - El radicado exista
+    - La asignación exista
+    - El usuario que hace la petición sea el analista asignado
+    - El estado de asignación permita la operación
+    """
+    radicado_id = serializers.IntegerField(
+        help_text="ID del radicado"
+    )
+    asignacion_id = serializers.IntegerField(
+        help_text="ID de la asignación del radicado al predio"
+    )
+    mutacion = serializers.JSONField(
+        help_text="Datos de la mutación a procesar"
+    )
+
+    def validate_radicado_id(self, value):
+        """Valida que el radicado exista"""
+        try:
+            radicado = Radicado.objects.get(id=value)
+            return value
+        except Radicado.DoesNotExist:
+            raise serializers.ValidationError(f"No existe un radicado con ID {value}")
+
+    def validate_asignacion_id(self, value):
+        """Valida que la asignación exista"""
+        try:
+            asignacion = RadicadoPredioAsignado.objects.get(id=value)
+            return value
+        except RadicadoPredioAsignado.DoesNotExist:
+            raise serializers.ValidationError(f"No existe una asignación con ID {value}")
+
+    def validate(self, attrs):
+        """Validación cruzada entre radicado, asignación y usuario"""
+        radicado_id = attrs.get('radicado_id')
+        asignacion_id = attrs.get('asignacion_id')
+        
+        # Obtener la asignación
+        try:
+            asignacion = RadicadoPredioAsignado.objects.select_related(
+                'radicado', 'estado_asignacion', 'mutacion', 'predio', 'usuario_analista'
+            ).get(id=asignacion_id)
+        except RadicadoPredioAsignado.DoesNotExist:
+            raise serializers.ValidationError("La asignación especificada no existe")
+
+        # Validar que la asignación corresponde al radicado
+        if asignacion.radicado.id != radicado_id:
+            raise serializers.ValidationError(
+                f"La asignación {asignacion_id} no corresponde al radicado {radicado_id}"
+            )
+
+        # Validar que el usuario actual sea el analista asignado
+        request = self.context.get('request')
+        if request and request.user:
+            if not asignacion.usuario_analista:
+                raise serializers.ValidationError(
+                    "Esta asignación no tiene un analista asignado"
+                )
+            
+            if asignacion.usuario_analista.id != request.user.id:
+                raise serializers.ValidationError(
+                    "No tienes permisos para procesar esta asignación. "
+                    "Solo el analista asignado puede procesar la mutación."
+                )
+
+        # Validar estado de asignación (opcional - puedes ajustar según tu lógica)
+        estados_permitidos = ['Pendiente']  # Ajusta según tus estados
+        if asignacion.estado_asignacion.ilicode not in estados_permitidos:
+            raise serializers.ValidationError(
+                f"No se puede procesar la mutación. Estado actual: {asignacion.estado_asignacion.ilicode}"
+            )
+
+        # Agregar instancias al contexto para uso posterior
+        attrs['asignacion_instance'] = asignacion
+        attrs['radicado_instance'] = asignacion.radicado
+        attrs['mutacion_tipo'] = asignacion.mutacion.ilicode
+
+        return attrs
