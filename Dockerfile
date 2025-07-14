@@ -17,7 +17,19 @@ RUN apt-get update && \
     libffi-dev \
     python-dev-is-python3 \
     build-essential \
-    gdal-bin binutils libproj-dev libgdal-dev
+    gdal-bin binutils libproj-dev libgdal-dev \
+    libpango-1.0-0 \
+    libharfbuzz0b \
+    libpangoft2-1.0-0 \
+    libffi-dev \
+    libjpeg-dev \
+    libopenjp2-7-dev \
+    libcairo2 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    libffi-dev \
+    shared-mime-info \
+    && rm -rf /var/lib/apt/lists/*
 
 # Instalar dependencias
 COPY requirements.txt /app/

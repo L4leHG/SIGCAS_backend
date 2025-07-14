@@ -20,6 +20,19 @@ class IsControlAmindUser(permissions.BasePermission):
                 return True
         return False
 
+class IsCoordinadorOrAdminUser(permissions.BasePermission):
+    """
+    Permite el acceso solo a usuarios con rol de Coordinador o Admin.
+    """
+    def has_permission(self, request, view):
+        if request.user and request.user.is_active and request.user.is_verified:
+            return Rol_predio.objects.filter(
+                user=request.user,
+                rol__name__in=('Admin', 'Coordinador'),
+                is_activate=True
+            ).exists()
+        return False
+
 # ESTA CLASE HABILITA SOLO AL ROLE DE ADMINISTRADOR Y EL DE CONSULTA
 class IsControlAnalistaUser(permissions.BasePermission):
     """

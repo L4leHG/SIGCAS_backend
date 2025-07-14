@@ -8,7 +8,7 @@ from datetime import datetime
 from registro.apps.catastro.models import (
     
     InteresadoPredio, Predio, PredioUnidadespacial, Terreno, CaracteristicasUnidadconstruccion, EstructuraAvaluo,
-    TramiteCatastral, PredioTramitecatastral, Historial_predio,
+    TramiteCatastral, PredioTramitecatastral, Historial_predio, 
     CrMutaciontipo, CrEstadotipo, 
     )
 class BaseSerializer():
@@ -61,73 +61,34 @@ class BaseSerializer():
         self.data_resolucion_predio['tramite_catastral'] = instance_resolucion
         self.data_resolucion_predio['radicado_asignado'] = instance_resolucion.radicado_asignado
 
-    def crear_registros_historial_predio(self, instance_predio=None, interesado_predio=None, 
-                                       instance_unidadespacial=None, instance_resolucion_predio=None):
+    def crear_registros_historial_predio(self, instance_predio, interesado_predio, 
+                                        instance_unidadespacial, instance_resolucion_predio,
+                                        es_mutacion_tercera=False):
         """
-        Crea registros en Historial_predio de forma eficiente.
-        
-        Args:
-            instance_predio: Instancia del predio
-            interesado_predio: Lista de instancias InteresadoPredio
-            instance_unidadespacial: Lista de instancias PredioUnidadespacial
-            instance_resolucion_predio: Instancia de PredioTramitecatastral
+        Crea los registros en la tabla Historial_predio, asociando el predio con sus
+        interesados y unidades espaciales (terrenos, unidades constructivas).
         """
-        registros_historial = []
-        
-        # Convertir a listas si no lo son
-        interesados = interesado_predio if isinstance(interesado_predio, list) else [interesado_predio] if interesado_predio else []
-        unidades = instance_unidadespacial if isinstance(instance_unidadespacial, list) else [instance_unidadespacial] if instance_unidadespacial else []
-        
-        # Crear registros para cada combinación de interesado y unidad espacial
-        if interesados and unidades:
-            for interesado in interesados:
-                for unidad in unidades:
-                    registros_historial.append(Historial_predio(
-                        predio=instance_predio,
-                        interesado_predio=interesado,
-                        predio_unidadespacial=unidad,
-                        predio_tramitecatastral=instance_resolucion_predio
-                    ))
-        elif interesados:
-            # Solo interesados, sin unidades espaciales
-            for interesado in interesados:
-                registros_historial.append(Historial_predio(
-                    predio=instance_predio,
-                    interesado_predio=interesado,
-                    predio_unidadespacial=None,
-                    predio_tramitecatastral=instance_resolucion_predio
-                ))
-        elif unidades:
-            # Solo unidades espaciales, sin interesados
-            for unidad in unidades:
-                registros_historial.append(Historial_predio(
-                    predio=instance_predio,
-                    interesado_predio=None,
-                    predio_unidadespacial=unidad,
-                    predio_tramitecatastral=instance_resolucion_predio
-                ))
-        else:
-            # Registro mínimo solo con predio y trámite
-            registros_historial.append(Historial_predio(
-                predio=instance_predio,
-                interesado_predio=None,
-                predio_unidadespacial=None,
-                predio_tramitecatastral=instance_resolucion_predio
-            ))
-        
-        # Crear todos los registros de una sola vez
-        if registros_historial:
-            Historial_predio.objects.bulk_create(registros_historial)
+        # Preparar los datos base para crear los registros históricos
+        data_resolucion_historica = {
+            'predio': instance_predio,
+            'interesado_predio': interesado_predio,
+            'predio_unidadespacial': instance_unidadespacial,
+            'predio_tramitecatastral': instance_resolucion_predio,
+            'es_mutacion_tercera': es_mutacion_tercera
+        }
 
+        # Llamar al método que crea los registros en la tabla Historial_predio
+        self.create_resolucion_historica(data_resolucion_historica)
+        
     def get_terrenos_unidades_alfa_historica(self, 
             predio = None, 
             instance_predio = None, 
             instance_predio_actual = None, 
             instance_predio_novedad = None,
             instance_resolucion_predio=None,
-            validar_unidad = False,
-            validar_interesados = False,
-      
+            validar_unidad=False,
+            validar_interesados=True,
+            archivo_geometria=None
         ):
         
         npn = predio.get('npn')
@@ -149,14 +110,17 @@ class BaseSerializer():
         # INCORPORAR TERRENOS
         instance_terrenos = self.incorporar_terrenos(predio, instance_predio, instance_predio_actual, instance_predio_novedad,instance_terreno_geo)
         
+        #***********************************************************************************************************************************UNIDADES
+        
         instance_unidades = self.incorporar_unidades(
-            predio=predio, 
-            instance_predio_actual=instance_predio_actual,
-            instance_predio_novedad=instance_predio_novedad,
-            validar=validar_unidad
+            predio,
+            instance_predio_actual,
+            instance_predio_novedad,
+            validar_unidad,
+            archivo_geometria
         )
         
-        #INCORPORAR ALFA CARTO
+        #***********************************************************************************************************************************UNIDADESPACIAL
         data_unidadespacial = {
             'terrenos': instance_terrenos if terrenos else None,
             'unidades':instance_unidades if unidades else None, 
@@ -165,7 +129,8 @@ class BaseSerializer():
             'predio_actual': instance_predio_actual,
             'npn': npn,
             'resolucion_predio': instance_resolucion_predio,
-            'eliminar_unidad': eliminadas
+            'eliminar_unidad': eliminadas,
+            'es_mutacion_tercera': mutacion and 'Tercera' in str(mutacion)
         }
         instance_unidadespacial = self.create_Unidadespacial(data_unidadespacial)
         
@@ -175,6 +140,7 @@ class BaseSerializer():
             instance_predio=instance_predio,
             interesado_predio=interesado_predio,
             instance_unidadespacial=instance_unidadespacial,
-            instance_resolucion_predio=instance_resolucion_predio
+            instance_resolucion_predio=instance_resolucion_predio,
+            es_mutacion_tercera=data_unidadespacial.get('es_mutacion_tercera', False)
         )
             

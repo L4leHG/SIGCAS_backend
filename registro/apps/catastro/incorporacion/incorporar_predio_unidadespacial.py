@@ -1,5 +1,5 @@
 from registro.apps.catastro.models import (
-    Historial_predio, PredioUnidadespacial, CrEstadotipo
+    Historial_predio, PredioUnidadespacial, CrEstadotipo, Unidadconstruccion, Terreno
 )
 from django.db.models import QuerySet
 
@@ -49,52 +49,47 @@ class IncorporarPredioUnidadespacial():
 
     def procesar_tipo_unidadespacial(self, list_json, tipo_dato, campo_modelo, otro_tipo_dato):
         """
-        Helper que procesa un tipo de unidad espacial (terreno o unidad).
-        Devuelve dos listas: una de instancias nuevas para crear y otra de instancias existentes para reutilizar.
+        Procesa un tipo específico de unidad espacial (terreno o unidad de construcción),
+        decidiendo si crear nuevas instancias, reutilizar existentes, o crear copias.
         """
         nuevas_instancias = []
         instancias_existentes = []
         instance_predio_novedad = list_json.get('predio_novedad')
         datos_json = list_json.get(tipo_dato)
+        es_mutacion_tercera = list_json.get('es_mutacion_tercera', False)
 
         if datos_json:
-            # Escenario 1: Hay datos nuevos en el JSON. Preparamos instancias para bulk_create.
-            for dato in datos_json:
-                data_unidadespacial = {
-                    'terreno': None,
-                    'unidadconstruccion': None,
-                    'predio': instance_predio_novedad,
-                }
-                instance_key = f'instance_{campo_modelo}'
-                data_unidadespacial[campo_modelo] = dato.get(instance_key)
-                nuevas_instancias.append(PredioUnidadespacial(**data_unidadespacial))
-
+            # Escenario 1: Hay datos nuevos en el JSON (ya sean unidades o terrenos).
+            # Se crean las relaciones en PredioUnidadespacial.
+            for instancia in datos_json:
+                if tipo_dato == 'unidades':
+                    nuevas_instancias.append(PredioUnidadespacial(
+                        unidadconstruccion=instancia,
+                        predio=instance_predio_novedad
+                    ))
+                elif tipo_dato == 'terrenos':
+                    nuevas_instancias.append(PredioUnidadespacial(
+                        terreno=instancia,
+                        predio=instance_predio_novedad
+                    ))
         else:
-            # Escenario 2: No hay datos en el JSON. Intentamos copiar de un predio anterior.
-            predio_para_filtrar = self.get_predio_para_filtrar(list_json, instance_predio_novedad)
-            qs_historicas = self.consultar_historial_predio(predio_para_filtrar, campo_modelo)
-
-            if qs_historicas.exists():
-                for hist in qs_historicas:
-                    instancias_existentes.append(hist.predio_unidadespacial)
-            else:
-                predio_actual = list_json.get('predio_actual')
-                if predio_actual:
-                    filter_kwargs = {
-                        'predio': predio_actual,
-                        f'predio_unidadespacial__{campo_modelo}__isnull': False
+            # Escenario 2: No hay datos en el JSON. Se intenta copiar del predio actual (lógica de mutación tercera).
+            predio_actual = list_json.get('predio_actual')
+            if predio_actual and es_mutacion_tercera:
+                filter_kwargs = {
+                    'predio': predio_actual,
+                    f'{campo_modelo}__isnull': False
+                }
+                qs_actuales = PredioUnidadespacial.objects.filter(**filter_kwargs)
+                
+                for relacion_actual in qs_actuales:
+                    copia_data = {
+                        'terreno': relacion_actual.terreno,
+                        'unidadconstruccion': relacion_actual.unidadconstruccion,
+                        'predio': instance_predio_novedad,
+                        'local_id': relacion_actual.local_id
                     }
-                    qs_actuales = Historial_predio.objects.filter(**filter_kwargs)
-                    
-                    if list_json.get(otro_tipo_dato):
-                        for hist in qs_actuales:
-                            copia = hist.predio_unidadespacial
-                            copia.id = None
-                            copia.predio = instance_predio_novedad
-                            nuevas_instancias.append(copia)
-                    else:
-                        for hist in qs_actuales:
-                            instancias_existentes.append(hist.predio_unidadespacial)
+                    nuevas_instancias.append(PredioUnidadespacial(**copia_data))
 
         return nuevas_instancias, instancias_existentes
 

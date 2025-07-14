@@ -85,16 +85,18 @@ class IncorporarMutacionTercera(
 
     def validar_permisos_mutacion(self, mutacion):
         """
-        Valida que la mutación tenga los permisos necesarios (radicado y analista asignado).
+        Valida que la mutación tenga los permisos necesarios.
+        
+        Nota: Los permisos de radicado y analista ya se validan en 
+        MutacionRadicadoValidationSerializer, por lo que no es necesario 
+        validarlos nuevamente aquí.
         
         Args:
             mutacion (dict): Datos de la mutación
         """
-        if not mutacion.get('radicado'):
-            raise ValidationError('La mutación de tercera clase requiere un radicado asignado.')
-        
-        if not mutacion.get('analista'):
-            raise ValidationError('La mutación de tercera clase requiere un analista asignado.')
+        # Los permisos se validan en el serializer de entrada
+        # No es necesario validar radicado y analista aquí
+        pass
 
     def modificar_destino_economico_predio(self, predio, instance_predio):
         """
@@ -146,14 +148,20 @@ class IncorporarMutacionTercera(
         
         # PROCESAR ELIMINACION DE RELACIONES DE UNIDADES (ANTES DE AGREGAR NUEVAS)
         if eliminar_unidades:
-            self.procesar_eliminacion_relaciones_unidades(instance_predio_actual)
-        
-        # Si se envían unidades nuevas, agregarlas
-        if unidades_nuevas:
+            # Para eliminar, simplemente pasamos una lista vacía.
+            # La lógica subyacente no creará ninguna relación de unidad.
+            predio_procesado['unidades'] = []
+        elif unidades_nuevas:
+            # Si se envían unidades nuevas, las agregamos para su procesamiento.
             predio_procesado['unidades'] = unidades_nuevas
         else:
-            # Si no se envían unidades nuevas, conservar las existentes
+            # Si no se especifican nuevas unidades ni se eliminan,
+            # se conservan las existentes (se copian las relaciones).
             predio_procesado['unidades'] = None
+        
+        # Se agrega el tipo de mutación para que la lógica subyacente 
+        # pueda identificarla y crear las copias de las relaciones del terreno.
+        predio_procesado['mutacion'] = 'Tercera'
         
         # EJECUTAR PROCESO DE INCORPORACION CONSERVANDO ELEMENTOS EXISTENTES
         self.get_terrenos_unidades_alfa_historica(

@@ -58,6 +58,29 @@ class CaracteristicasUnidadconstruccionSerializer(serializers.ModelSerializer):
             return obj.tipo_unidad_construccion.ilicode
         return None
 
+class UnidadesSerializer(serializers.ModelSerializer):
+    tipo_unidad_construccion = serializers.SlugRelatedField(
+        queryset=CrUnidadconstrucciontipo.objects.all(),
+        slug_field='ilicode'
+    )
+    uso = serializers.SlugRelatedField(
+        queryset=CrUsouconstipo.objects.all(),
+        slug_field='ilicode'
+    )
+    class Meta:
+        model = CaracteristicasUnidadconstruccion
+        fields = [
+            'identificador',
+            'total_plantas',
+            'anio_construccion',
+            'avaluo_unidad',
+            'area_construida',
+            'estado_conservacion',
+            'puntaje',
+            'tipo_unidad_construccion',
+            'uso'
+        ]
+
 class UnidadConstruccionSerializer(GeoFeatureModelSerializer):
     caracteristicas_unidadconstruccion = CaracteristicasUnidadconstruccionSerializer()
     

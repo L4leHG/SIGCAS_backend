@@ -403,10 +403,10 @@ class IncorporarInteresadoSerializer():
         interesados_predios = Historial_predio.objects.filter(
             predio=instance_predio_actual,
             predio__estado__t_id=105, # Siempre busca sobre el predio activo.
-            interesado__isnull=False
-        ).select_related('interesado')
+            interesado_predio__isnull=False
+        ).select_related('interesado_predio__interesado')
         
-        return [resolucion.interesado for resolucion in interesados_predios]
+        return [resolucion.interesado_predio.interesado for resolucion in interesados_predios]
     
     def incorporar_interesados(self, predio=None, instance_predio=None, instance_predio_actual=None, validar=False):
         """
@@ -439,3 +439,40 @@ class IncorporarInteresadoSerializer():
 
         # Con la lista de asociaciones preparada, se crean las relaciones.
         return self.create_interesado_predio(list_json=list_para_asociar)
+
+    def _crear_interesados(self, validate_data, instance_predio):
+        """
+        Crea las relaciones InteresadoPredio de forma masiva y eficiente.
+        Utiliza bulk_create para insertar todos los registros en una sola consulta.
+        """
+        if not validate_data.get('interesados'):
+            return []
+
+        instancias_a_crear = []
+        for interesado in validate_data.get('interesados'):
+            serializer = InteresadoPredioSerializer(data=interesado)
+            serializer.is_valid(raise_exception=True)
+            # Se crea la instancia en memoria, sin guardarla en la BD todavía.
+            instancias_a_crear.append(InteresadoPredio(**interesado))
+
+        # Se insertan todas las instancias en la base de datos de una sola vez.
+        nuevos_interesado_predio = []
+        if instancias_a_crear:
+            nuevos_interesado_predio = InteresadoPredio.objects.bulk_create(instancias_a_crear)
+
+        return nuevos_interesado_predio
+
+    def _copiar_interesados(self, instance_predio, instance_predio_actual):
+        """
+        Copia los interesados del predio actual al nuevo predio.
+        """
+        interesados_actuales = InteresadoPredio.objects.filter(predio=instance_predio_actual)
+        nuevas_relaciones = [
+            InteresadoPredio(predio=instance_predio, interesado=relacion.interesado)
+            for relacion in interesados_actuales
+        ]
+        
+        if nuevas_relaciones:
+            return InteresadoPredio.objects.bulk_create(nuevas_relaciones)
+        
+        return []

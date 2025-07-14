@@ -6,7 +6,7 @@ from .views import (
     RadicadoPredioAsignadoCreateView, RadicadoPredioAsignadoUpdateView, UserListView,
     RadicadoPredioAsignadoListView, RadicadoPredioAsignadoDeleteView,
     RadicadoDeleteView, RadicadoPredioAsignadoUpdateView, RadicadoPredioAsignadoListView,RadicadoPredioAsignadoCreateView,
-    ProcesarMutacionView, ConsultarEstadoMutacionView, VerificarTransaccionalidadView,
+    ProcesarMutacionView, ConsultarEstadoMutacionView, VerificarTransaccionalidadView, ProcesarGeometriaView, FinalizarTramiteView,
  ######******DOMINIOS
     DominiosPredioView, DominiosInteresadoView, DominiosFuenteAdministrativaView, DominiosUnidadConstruccionView,
     UnidadAdministrativaBasicaTipoView, EstadoAsignacionView, MutacionTipoView,
@@ -46,10 +46,14 @@ urlpatterns = [
     ###############***********ENDPOINTS DE MUTACIONES
     ##Procesar mutación catastral
     path('api/mutacion/procesar/', ProcesarMutacionView.as_view(), name='procesar_mutacion'),
+    ##procesar geometria desde archivo .zip
+    path('api/mutacion/procesar-geometria/', ProcesarGeometriaView.as_view(), name='procesar_geometria'),
     ##Consultar estado de mutación
     path('api/mutacion/estado/<int:asignacion_id>/', ConsultarEstadoMutacionView.as_view(), name='consultar_estado_mutacion'),
     ##Verificar transaccionalidad (DEBUG)
     path('api/mutacion/verificar-transaccion/', VerificarTransaccionalidadView.as_view(), name='verificar_transaccionalidad'),
+    ##Finalizar un tramite
+    path('api/tramites/<int:tramite_id>/finalizar/', FinalizarTramiteView.as_view(), name='finalizar_tramite'),
 
     ###############***********ENDPOINTS DE USUARIOS
     path('api/usuarios/', UserListView.as_view(), name='listar_usuarios'),

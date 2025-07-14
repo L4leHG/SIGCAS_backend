@@ -9,12 +9,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError, APIException
 from rest_framework.decorators import action
 from rest_framework import serializers
+from rest_framework.parsers import MultiPartParser, JSONParser, FormParser
 from django.db.models import Q
 from django.template.loader import render_to_string
 from weasyprint import HTML
 from django.conf import settings
 from datetime import datetime
 import os
+import json
 
 from registro.apps.users.models import Rol_predio 
 from registro.apps.catastro.models import (
@@ -57,13 +59,15 @@ import copy
 from registro.apps.catastro.mutacion.incorporacion_primera import IncorporarMutacionPrimera
 from registro.apps.catastro.mutacion.incorporacion_tercera import IncorporarMutacionTercera
 from registro.apps.catastro.serializers import MutacionRadicadoValidationSerializer
-from registro.apps.utils.permission.permission import IsControlAnalistaUser
+from registro.apps.utils.permission.permission import IsControlAnalistaUser, IsCoordinadorOrAdminUser
 from registro.apps.catastro.utils_mutacion import (
     extraer_tipo_base_mutacion, 
     validar_coherencia_mutacion,
     es_tipo_mutacion_soportado
 )
 import traceback
+from registro.apps.catastro.incorporacion.incorporar_unidades import IncorporacionUnidadesSerializer as IncorporacionUnidadesHelper
+from registro.apps.catastro.models import Historial_predio
 
 logger = logging.getLogger(__name__)
 
@@ -458,22 +462,26 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
     authentication_classes = [CookieJWTAuthentication]
 
     def create(self, request, *args, **kwargs):
+        is_many = isinstance(request.data, list)
         try:
-            # Validar y crear la asignación
-            serializer = self.get_serializer(data=request.data)
+            # Validar y crear la(s) asignación(es)
+            serializer = self.get_serializer(data=request.data, many=is_many)
             serializer.is_valid(raise_exception=True)
             
             try:
-                instance = self.perform_create(serializer)
+                instances = self.perform_create(serializer)
                 # Serializar la respuesta
-                response_serializer = RadicadoPredioAsignadoSerializer(instance)
+                response_serializer = RadicadoPredioAsignadoSerializer(instances, many=is_many)
+                
+                mensaje = "Se crearon las asignaciones exitosamente" if is_many else "Se creó la asignación exitosamente"
+
                 return Response({
-                    "mensaje": "Se creó la asignación exitosamente",
+                    "mensaje": mensaje,
                     "data": response_serializer.data
                 }, status=status.HTTP_201_CREATED)
             except Exception as e:
-                logger.error(f"Error al guardar la asignación: {str(e)}", exc_info=True)
-                raise ValidationError(f"Error al guardar la asignación: {str(e)}")
+                logger.error(f"Error al guardar la(s) asignación(es): {str(e)}", exc_info=True)
+                raise ValidationError(f"Error al guardar la(s) asignación(es): {str(e)}")
             
         except ValidationError as e:
             return Response(
@@ -491,7 +499,7 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
-            logger.error(f"Error inesperado al crear asignación: {str(e)}", exc_info=True)
+            logger.error(f"Error inesperado al crear asignación(es): {str(e)}", exc_info=True)
             return Response(
                 {"error": "Ocurrió un error al procesar la solicitud"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -975,3 +983,130 @@ class ConsultarEstadoMutacionView(APIView):
                 'error': 'Error interno del servidor',
                 'detalle': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+class ProcesarGeometriaView(APIView):
+    """
+    Endpoint para subir y validar un archivo ZIP con geometrías (Shapefile).
+    """
+    permission_classes = [IsControlAnalistaUser]
+    authentication_classes = [CookieJWTAuthentication]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        archivo_zip = request.FILES.get('file')
+        npn = request.data.get('npn')
+
+        if not archivo_zip:
+            return Response({"error": "No se proporcionó el archivo 'file'."}, status=status.HTTP_400_BAD_REQUEST)
+        if not npn:
+            return Response({"error": "No se proporcionó el 'npn' del predio."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            helper = IncorporacionUnidadesHelper()
+            features_dict = helper._procesar_geometria_zip(archivo_zip, npn)
+            
+            # Construir la respuesta final FeatureCollection
+            feature_collection = {
+                "type": "FeatureCollection",
+                "features": list(features_dict.values()) # Convertimos los valores del diccionario a una lista
+            }
+
+            return Response(feature_collection, status=status.HTTP_200_OK)
+
+        except ValidationError as ve:
+            return Response({'error': 'Error de validación de geometría', 'detalle': ve.detail}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error al procesar el archivo de geometría: {e}", exc_info=True)
+            return Response({"error": "Error interno al procesar el archivo.", "detalle": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class FinalizarTramiteView(APIView):
+    """
+    Endpoint para finalizar un trámite catastral.
+    Este proceso es el paso final después de que una mutación ha sido procesada y revisada.
+    
+    Acciones:
+    1. Cambia el estado de la asignación del radicado a 'Finalizado'.
+    2. Pasa el predio original (activo) a estado 'historico'.
+    3. Activa el predio o predios que estaban en estado 'novedad'.
+    Todo el proceso se ejecuta en una transacción atómica.
+    """
+    permission_classes = [IsCoordinadorOrAdminUser]
+    authentication_classes = [CookieJWTAuthentication]
+
+    def post(self, request, tramite_id, *args, **kwargs):
+        try:
+            with transaction.atomic():
+                # 1. Obtener el trámite y sus relaciones críticas
+                try:
+                    tramite = TramiteCatastral.objects.select_related(
+                        'radicado_asignado',
+                        'radicado_asignado__predio',
+                        'radicado_asignado__estado_asignacion'
+                    ).get(id=tramite_id)
+                except TramiteCatastral.DoesNotExist:
+                    return Response({'error': f'Trámite con ID {tramite_id} no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+                asignacion = tramite.radicado_asignado
+                predio_original = asignacion.predio
+
+                # 2. Validar que el trámite no esté ya finalizado
+                if asignacion.estado_asignacion.ilicode == 'Finalizado':
+                    return Response({'error': 'Este trámite ya ha sido finalizado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+                # 3. Identificar el(los) predio(s) de novedad asociados al trámite
+                # Se obtiene primero los IDs de los predios desde el historial, y se convierte a lista para evitar lazy evaluation
+                predios_novedad_ids = list(Historial_predio.objects.filter(
+                    predio_tramitecatastral__tramite_catastral=tramite,
+                    predio__estado__ilicode='Novedad'
+                ).values_list('predio__id', flat=True).distinct())
+
+                # Luego se obtienen los objetos Predio completos
+                predios_novedad = Predio.objects.filter(id__in=predios_novedad_ids)
+
+
+                # 4. Validar que existan predios de novedad para activar
+                if not predios_novedad.exists():
+                    return Response({'error': 'No se encontraron predios en estado "novedad" asociados a este trámite.'}, status=status.HTTP_400_BAD_REQUEST)
+
+                # 5. Obtener los objetos de estado necesarios
+                try:
+                    estado_activo = CrEstadotipo.objects.get(ilicode='Activo')
+                    estado_historico = CrEstadotipo.objects.get(ilicode='Historico')
+                    estado_finalizado = EstadoAsignacion.objects.get(ilicode='Finalizado')
+                except (CrEstadotipo.DoesNotExist, EstadoAsignacion.DoesNotExist) as e:
+                    logger.error(f"Error crítico de configuración: No se encontraron estados base: {e}")
+                    return Response({'error': 'Error de configuración del servidor: Faltan estados (activo, historico, Finalizado).'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+                # 6. Ejecutar las actualizaciones de estado
+                logger.info(f"Finalizando trámite {tramite_id}. Predio original: {predio_original.numero_predial_nacional}")
+                
+                current_datetime = datetime.now()
+
+                # Pasar predio original a histórico y actualizar fin de vida útil
+                predio_original.estado = estado_historico
+                predio_original.fin_vida_util_version = current_datetime
+                predio_original.save()
+                logger.info(f"Predio {predio_original.numero_predial_nacional} pasado a estado 'historico'. Fin de vida útil: {current_datetime}")
+
+                # Activar predios de novedad y actualizar comienzo de vida útil
+                npns_activados = list(predios_novedad.values_list('numero_predial_nacional', flat=True))
+                predios_novedad.update(estado=estado_activo, comienzo_vida_util_version=current_datetime)
+                logger.info(f"Activados {len(npns_activados)} predios: {npns_activados}. Comienzo de vida útil: {current_datetime}")
+
+                # Finalizar la asignación
+                asignacion.estado_asignacion = estado_finalizado
+                asignacion.save()
+                logger.info(f"Asignación {asignacion.id} pasada a estado 'Finalizado'.")
+
+                return Response({
+                    'mensaje': 'Trámite finalizado exitosamente.',
+                    'predio_historico': predio_original.id,
+                    'predio_activado': predios_novedad_ids
+                }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Error al finalizar el trámite {tramite_id}: {e}", exc_info=True)
+            return Response({'error': 'Ocurrió un error inesperado durante la finalización del trámite.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
