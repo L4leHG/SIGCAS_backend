@@ -24,6 +24,7 @@ from registro.apps.catastro.models import (
     CrConstruccionplantatipo,
     User
 )
+from registro.apps.users.models import Rol_predio
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
 import re
 import logging
@@ -442,13 +443,20 @@ class CrConstruccionplantatipoSerializer(serializers.ModelSerializer):
         
 class UserSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.SerializerMethodField()
+    rol = serializers.SerializerMethodField()
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'first_name', 'last_name', 'email','nombre_completo']
+        fields = ['id', 'username', 'first_name', 'last_name', 'email','nombre_completo', 'rol']
 
     def get_nombre_completo(self, obj):
-        return f"{obj.first_name} {obj.last_name}".strip() if obj.first_name or obj.last_name else obj.username
+        if obj.first_name and obj.last_name:
+            return f"{obj.first_name} {obj.last_name}"
+        return obj.username
+    
+    def get_rol(self, obj):
+        # Usamos el prefetch_related que se hizo en la vista para eficiencia
+        return [rol_predio.rol.name for rol_predio in obj.rol_predio_set.all() if rol_predio.rol]
 
 
 #### ******************************SERIALIZER PARA RADICACION 

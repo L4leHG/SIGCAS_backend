@@ -91,7 +91,6 @@ class IncorporarMutacionPrimera(
             npn = predio.get('npn')
             
             # OBTENER INSTANCIAS DEL PREDIO
-            # Corregido: el método solo retorna 2 valores, no 3
             instance_predio, instance_predio_actual = self.get_instance_predio_and_actual(predio)
             
             # ADICIONAR LA INSTANCIA EN RESOLUCION PREDIO
@@ -128,38 +127,23 @@ class IncorporarMutacionPrimera(
             if not predio.get('interesados'):
                 raise ValidationError(f'No se registraron propietarios para el predio {npn}. Los interesados son obligatorios para cambio de propietario.')
             
-            # CONSERVAR TERRENOS Y UNIDADES EXISTENTES
-            # Para cambio de propietario, NO se modifican terrenos ni unidades
-            # Se conservan los existentes del predio actual
-            
-            # Preparar datos para conservar elementos existentes
-            predio_procesado = predio.copy()
-            
-            # NO establecer terrenos y unidades como None
-            # En su lugar, dejar que el sistema conserve los existentes
-            # Esto se logra no pasando estos campos o dejándolos como están
-            if 'terrenos' not in predio_procesado or not predio_procesado.get('terrenos'):
-                predio_procesado['terrenos'] = None  # Indica que se conserven los existentes
-            
-            if 'unidades' not in predio_procesado or not predio_procesado.get('unidades'):
-                predio_procesado['unidades'] = None  # Indica que se conserven los existentes
-                
-            predio_procesado['geometry_terreno'] = None  # No se modifica geometría
+            # --- LÓGICA DE INCORPORACIÓN EXPLÍCITA PARA MUTACIÓN PRIMERA ---
 
-            # INCORPORAR INTERESADOS (NUEVOS O ACTUALIZADOS), CONSERVAR TERRENOS Y UNIDADES
-            # Este método se encarga de ejecutar todas las funciones necesarias:
-            # - incorporar_terreno_geo
-            # - incorporar_interesados
-            # - incorporar_terrenos
-            # - incorporar_unidades
-            # - create_Unidadespacial
-            # - Crear registro en Historial_predio
-            self.get_terrenos_unidades_alfa_historica(
-                predio=predio_procesado, 
-                instance_predio=instance_predio, 
-                instance_predio_actual=instance_predio_actual, 
-                instance_predio_novedad=None,  # No hay novedad previa
-                instance_resolucion_predio=instance_resolucion_predio,
-                validar_unidad=False,  # No validar unidades (se conservan existentes)
-                validar_interesados=True  # SÍ validar interesados (obligatorios para cambio propietario)
+            # 1. CONSERVAR Y RELACIONAR GEOMETRÍA (TERRENO Y UNIDADES)
+            instance_predio, unidades_espaciales_creadas = self.conservar_y_relacionar_geometria(instance_predio, instance_predio_actual)
+
+            # 2. INCORPORAR INTERESADOS (NUEVOS PROPIETARIOS)
+            interesados_predio_creados = self.incorporar_interesados(
+                predio=predio,
+                instance_predio=instance_predio
             )
+
+            # 3. CREAR REGISTRO EN HISTORIAL DEL PREDIO
+            self.create_historial_predio({
+                'predio': instance_predio,
+                'predio_tramitecatastral': instance_resolucion_predio,
+                'interesado_predio': interesados_predio_creados,
+                'predio_unidadespacial': unidades_espaciales_creadas
+            })
+
+            # La llamada genérica get_terrenos_unidades_alfa_historica se reemplaza por las 3 llamadas explícitas de arriba.

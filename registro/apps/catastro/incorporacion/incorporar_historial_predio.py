@@ -5,7 +5,7 @@ class IncorporacionHistorialPredioSerializer:
     Clase para manejar la incorporación de registros al historial de predios.
     """
 
-    def create_resolucion_historica(self, data_dict):
+    def create_historial_predio(self, data_dict):
         """
         Crea registros históricos para predios basados en interesados y unidades espaciales.
         

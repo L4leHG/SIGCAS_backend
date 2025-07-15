@@ -116,27 +116,43 @@ class PredioDetalleAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            predio = Predio.objects.get(numero_predial_nacional=numero_predial)
-        except Predio.DoesNotExist:
+        # Usamos filter() para obtener todos los registros coincidentes
+        predios = Predio.objects.filter(numero_predial_nacional=numero_predial)
+
+        if not predios.exists():
             return Response(
-                {"error": "No se encontró un predio con ese número predial."},
+                {"error": "No se encontraron predios con ese número predial."},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        serializer = PredioSerializer(predio)
-        data = serializer.data
-
         if formato.lower() == 'pdf':
+            predio_id = request.query_params.get('predio_id')
+            if not predio_id:
+                return Response(
+                    {"error": "Para generar un PDF, debe proporcionar el parámetro 'predio_id'."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
             try:
-                return serializer.generate_pdf(data, numero_predial)
+                # Nos aseguramos que el predio solicitado por ID pertenezca al NPN consultado
+                predio_para_pdf = predios.get(id=predio_id)
+                
+                serializer = PredioSerializer(predio_para_pdf)
+                return serializer.generate_pdf(serializer.data, numero_predial)
+            except Predio.DoesNotExist:
+                return Response(
+                    {"error": f"No se encontró un predio con ID {predio_id} para el número predial {numero_predial}."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
             except Exception as e:
                 return Response(
                     {"error": "Ocurrió un error al generar el PDF"},
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
 
-        return Response(data)
+        # Para JSON, serializamos todos los resultados encontrados
+        serializer = PredioSerializer(predios, many=True)
+        return Response(serializer.data)
 
 #### ********************************* VIEWS PARA DOMINIOS *********************************
 
@@ -217,6 +233,8 @@ class UserListView(generics.ListAPIView):
             'first_name', 
             'last_name', 
             'email'
+        ).prefetch_related(
+            'rol_predio_set__rol'  # Prefetch para optimizar la obtención de roles
         ).order_by('first_name', 'last_name')
 
         # Filtro opcional por nombre o apellido

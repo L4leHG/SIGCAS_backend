@@ -284,195 +284,138 @@ class IncorporarInteresadoSerializer():
     
     
     def create_interesado_predio(self, list_json=None):
-        """
-        Crea las relaciones InteresadoPredio de forma masiva y eficiente.
-        Utiliza bulk_create para insertar todos los registros en una sola consulta.
-        """
-        if not list_json:
-            return []
+        interesado= list_json.get('interesado')
+        predio= list_json.get('predio')
 
-        instancias_a_crear = []
-        for data in list_json:
-            serializer = InteresadoPredioSerializer(data=data)
-            serializer.is_valid(raise_exception=True)
-            # Se crea la instancia en memoria, sin guardarla en la BD todavía.
-            instancias_a_crear.append(InteresadoPredio(**data))
+        #validar interesado
+        if interesado is None:
+            raise ValidationError('No se ha enviado el interesado')
+        
+        #validar predio
+        if predio is None:
+            raise ValidationError('No se ha enviado el predio')
+        
+        instancia_interesado_predio = InteresadoPredio(
+            interesado=interesado,
+            predio=predio
+        )
+        instancia_interesado_predio.save()
+        return instancia_interesado_predio
 
-        # Se insertan todas las instancias en la base de datos de una sola vez.
-        if instancias_a_crear:
-            return InteresadoPredio.objects.bulk_create(instancias_a_crear)
-
-        return []
-    
     def create_interesado(self, validate_data = None, instancia_predio = None, instancia_resolucion_predio = None):
-        list_id_interesado = []
+        interesado = validate_data
+        numero_documento_interesado = interesado.get('numero_documento')
 
-        if validate_data.get('interesados'):
-            for interesado in validate_data.get('interesados'):
-                
-                # OBTENER LAS VARIABLES DEL DICCIONARIO
-                tipo_documento = interesado.get('tipo_documento')
-                primer_nombre=interesado.get('primer_nombre').upper().strip() if interesado.get('primer_nombre') else None
-                segundo_nombre=interesado.get('segundo_nombre').upper().strip() if interesado.get('segundo_nombre') else None
-                primer_apellido=interesado.get('primer_apellido').upper().strip() if interesado.get('primer_apellido') else None
-                segundo_apellido=interesado.get('segundo_apellido').upper().strip() if interesado.get('segundo_apellido') else None
-                sexo = interesado.get('sexo')
-                razon_social = interesado.get('razon_social').upper().strip() if interesado.get('razon_social') else None
-                tipo_interesado = interesado.get('tipo_interesado')                
-                numero_documento = interesado.get('numero_documento')
+        #VALIDAR CARACTERES ESPECIALES EN EL NOMBRE
+        nombre = f'{interesado.get("primer_nombre")}{interesado.get("segundo_nombre")}{interesado.get("primer_apellido")}{interesado.get("segundo_apellido")}'
+        
+        if self.validar_caracteres_especiales_razon_social(interesado.get('razon_social')):
+            raise ValidationError(f"La razon social no puede contener caracteres extraños.")
 
-                #VALIDAR CARACTERES ESPECIALES EN EL NOMBRE
-                nombre = f'{primer_nombre}{segundo_nombre}{primer_apellido}{segundo_apellido}'
-                
-                if self.validar_caracteres_especiales_razon_social(razon_social):
-                    raise ValidationError(f"La razon social no puede contener caracteres extraños.")
+        if self.validar_caracteres_especiales_nombre(nombre):
+            raise ValidationError(f"Los nombres y apellidos no pueden contener caracteres extraños.") 
 
-                if self.validar_caracteres_especiales_nombre(nombre):
-                    raise ValidationError(f"Los nombres y apellidos no pueden contener caracteres extraños.") 
+        if interesado.get('tipo_documento') == 'Pasaporte':
+            if self.validar_caracteres_especiales_pasaporte(numero_documento_interesado):
+                raise ValidationError(f"Solo se permite el caracter especial '-' en el documento de identificacion")
+        elif interesado.get('tipo_documento') == 'NIT':
+            if self.validar_caracteres_especiales_nit(numero_documento_interesado):
+                raise ValidationError(f"Solo se permite el caracter especial '-' en el NIT")
+        else:
+            if self.validar_caracteres_especiales_cedula(numero_documento_interesado):
+                raise ValidationError(f"No se permiten el caracteres especiales")
 
-                if tipo_documento == 'Pasaporte':
-                    if self.validar_caracteres_especiales_pasaporte(numero_documento):
-                        raise ValidationError(f"Solo se permite el caracter especial '-' en el documento de identificacion")
-                elif tipo_documento == 'NIT':
-                    if self.validar_caracteres_especiales_nit(numero_documento):
-                        raise ValidationError(f"Solo se permite el caracter especial '-' en el NIT")
-                else:
-                    if self.validar_caracteres_especiales_cedula(numero_documento):
-                        raise ValidationError(f"No se permiten el caracteres especiales")
+        instancia_sexo = CrSexotipo.objects.get(ilicode=interesado.get('sexo'))
+        instancia_tipo_documento = ColDocumentotipo.objects.get(ilicode=interesado.get('tipo_documento'))
+        instancia_interesado_tipo = ColInteresadotipo.objects.get(ilicode=interesado.get('tipo_interesado'))
 
-                instancia_sexo = CrSexotipo.objects.get(ilicode=sexo)
-                instancia_tipo_documento = ColDocumentotipo.objects.get(ilicode=tipo_documento)
-                instancia_interesado_tipo = ColInteresadotipo.objects.get(ilicode=tipo_interesado)
+        # Definimos los campos para la búsqueda y para la creación
+        search_fields = {
+            'tipo_documento': instancia_tipo_documento,
+            'numero_documento': numero_documento_interesado,
+        }
+        
+        # Para personas naturales, la unicidad depende del nombre completo y sexo.
+        # Para personas jurídicas, depende de la razón social.
+        if instancia_interesado_tipo.t_id == 6: # Persona Natural
+            search_fields.update({
+                'primer_nombre': interesado.get('primer_nombre'),
+                'segundo_nombre': interesado.get('segundo_nombre'),
+                'primer_apellido': interesado.get('primer_apellido'),
+                'segundo_apellido': interesado.get('segundo_apellido'),
+                'sexo': instancia_sexo,
+            })
+            defaults = {
+                'razon_social': None,
+                'tipo_interesado': instancia_interesado_tipo,
+            }
+        else: # Persona Jurídica
+            search_fields['razon_social'] = interesado.get('razon_social')
+            defaults = {
+                'primer_nombre': None,
+                'segundo_nombre': None,
+                'primer_apellido': None,
+                'segundo_apellido': None,
+                'sexo': None,
+                'tipo_interesado': instancia_interesado_tipo,
+            }
 
-                # Definimos los campos para la búsqueda y para la creación
-                search_fields = {
-                    'tipo_documento': instancia_tipo_documento,
-                    'numero_documento': numero_documento,
-                }
-                
-                # Para personas naturales, la unicidad depende del nombre completo y sexo.
-                # Para personas jurídicas, depende de la razón social.
-                if instancia_interesado_tipo.t_id == 6: # Persona Natural
-                    search_fields.update({
-                        'primer_nombre': primer_nombre,
-                        'segundo_nombre': segundo_nombre,
-                        'primer_apellido': primer_apellido,
-                        'segundo_apellido': segundo_apellido,
-                        'sexo': instancia_sexo,
-                    })
-                    defaults = {
-                        'razon_social': None,
-                        'tipo_interesado': instancia_interesado_tipo,
-                    }
-                else: # Persona Jurídica
-                    search_fields['razon_social'] = razon_social
-                    defaults = {
-                        'primer_nombre': None,
-                        'segundo_nombre': None,
-                        'primer_apellido': None,
-                        'segundo_apellido': None,
-                        'sexo': None,
-                        'tipo_interesado': instancia_interesado_tipo,
-                    }
+        # Usamos get_or_create para buscar o crear al interesado de forma atómica
+        instancia_interesado, created = Interesado.objects.get_or_create(
+            **search_fields,
+            defaults=defaults
+        )
 
-                # Usamos get_or_create para buscar o crear al interesado de forma atómica
-                instancia_interesado, created = Interesado.objects.get_or_create(
-                    **search_fields,
-                    defaults=defaults
-                )
+        if created:
+            instancia_interesado.save()
 
-                # Añadimos el interesado (existente o nuevo) a la lista para asociarlo al predio
-                list_id_interesado.append({
-                    'interesado': instancia_interesado,
-                    'predio': instancia_predio
-                })
-
-        elif validate_data.get('CrMutaciontipo') in (
-            'Mutacion_Primera_Clase.Cambio_Propietario'):
-            raise ValidationError(f"La mutacion de {validate_data.get('mutacion')} para el predio {validate_data.get('npn')} debe tener asociado minimo un propietario.")
-        return list_id_interesado
+        #Crear interesado predio
+        return self.create_interesado_predio({
+            'interesado':instancia_interesado,
+            'predio':instancia_predio,
+        })
 
     def get_interesados_predios_actuales(self, instance_predio_actual):
         """
-        Obtiene una lista de objetos Interesado asociados a un predio activo.
-        Retorna siempre una lista (vacía si no hay resultados), nunca None.
+        Obtiene una lista de todos los interesados asociados a un predio actual.
         """
-        if not instance_predio_actual:
-            return []
-            
-        interesados_predios = Historial_predio.objects.filter(
-            predio=instance_predio_actual,
-            predio__estado__t_id=105, # Siempre busca sobre el predio activo.
-            interesado_predio__isnull=False
-        ).select_related('interesado_predio__interesado')
-        
-        return [resolucion.interesado_predio.interesado for resolucion in interesados_predios]
-    
+        return InteresadoPredio.objects.filter(predio=instance_predio_actual).select_related('interesado')
+
     def incorporar_interesados(self, predio=None, instance_predio=None, instance_predio_actual=None, validar=False):
-        """
-        Orquesta la creación o copia de interesados y los asocia a un predio.
-        Garantiza que el tipo de retorno sea siempre una lista de objetos InteresadoPredio.
-        """
-        interesados_json = predio.get('interesados')
-        npn = predio.get('npn')
-
-        if validar and not interesados_json:
-            raise ValidationError(f'Para el predio {npn} los interesados son obligatorios.')
         
-        list_para_asociar = []
-
-        if interesados_json:
-            # Escenario 1: Se proporcionan nuevos interesados en la solicitud.
-            list_para_asociar = self.create_interesado(
-                validate_data=predio, 
-                instancia_predio=instance_predio
+        if predio and predio.get('interesados'):
+            # Si se proporcionan interesados nuevos, se crean y asocian
+            return self._crear_interesados(
+                validate_data=predio.get('interesados'), 
+                instance_predio=instance_predio
             )
         elif instance_predio_actual:
-            # Escenario 2: No hay interesados en el JSON, se copian del predio activo anterior.
-            interesados_a_copiar = self.get_interesados_predios_actuales(instance_predio_actual)
-
-            if interesados_a_copiar:
-                list_para_asociar = [
-                    {'interesado': interesado, 'predio': instance_predio} 
-                    for interesado in interesados_a_copiar
-                ]
-
-        # Con la lista de asociaciones preparada, se crean las relaciones.
-        return self.create_interesado_predio(list_json=list_para_asociar)
+            # Si no hay interesados nuevos, se copian los del predio actual
+            return self._copiar_interesados(
+                instance_predio=instance_predio,
+                instance_predio_actual=instance_predio_actual
+            )
+        return []
 
     def _crear_interesados(self, validate_data, instance_predio):
-        """
-        Crea las relaciones InteresadoPredio de forma masiva y eficiente.
-        Utiliza bulk_create para insertar todos los registros en una sola consulta.
-        """
-        if not validate_data.get('interesados'):
-            return []
-
-        instancias_a_crear = []
-        for interesado in validate_data.get('interesados'):
-            serializer = InteresadoPredioSerializer(data=interesado)
-            serializer.is_valid(raise_exception=True)
-            # Se crea la instancia en memoria, sin guardarla en la BD todavía.
-            instancias_a_crear.append(InteresadoPredio(**interesado))
-
-        # Se insertan todas las instancias en la base de datos de una sola vez.
-        nuevos_interesado_predio = []
-        if instancias_a_crear:
-            nuevos_interesado_predio = InteresadoPredio.objects.bulk_create(instancias_a_crear)
-
-        return nuevos_interesado_predio
+        """Crea nuevos interesados y los asocia al predio."""
+        interesados_predio_creados = []
+        for interesado_data in validate_data:
+            interesado_predio = self.create_interesado(
+                validate_data=interesado_data, 
+                instancia_predio=instance_predio # Corregido: el nombre del parámetro es en español
+            )
+            interesados_predio_creados.append(interesado_predio)
+        return interesados_predio_creados
 
     def _copiar_interesados(self, instance_predio, instance_predio_actual):
-        """
-        Copia los interesados del predio actual al nuevo predio.
-        """
-        interesados_actuales = InteresadoPredio.objects.filter(predio=instance_predio_actual)
-        nuevas_relaciones = [
-            InteresadoPredio(predio=instance_predio, interesado=relacion.interesado)
-            for relacion in interesados_actuales
-        ]
-        
-        if nuevas_relaciones:
-            return InteresadoPredio.objects.bulk_create(nuevas_relaciones)
-        
-        return []
+        """Copia los interesados del predio actual al nuevo predio."""
+        interesados_a_copiar = self.get_interesados_predios_actuales(instance_predio_actual)
+        interesados_predio_creados = []
+        for relacion_actual in interesados_a_copiar:
+            nueva_relacion = self.create_interesado_predio({
+                'interesado': relacion_actual.interesado,
+                'predio': instance_predio
+            })
+            interesados_predio_creados.append(nueva_relacion)
+        return interesados_predio_creados

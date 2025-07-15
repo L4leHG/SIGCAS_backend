@@ -2,6 +2,7 @@ from registro.apps.catastro.models import (
     Historial_predio, PredioUnidadespacial, CrEstadotipo, Unidadconstruccion, Terreno
 )
 from django.db.models import QuerySet
+from rest_framework.serializers import ValidationError
 
 class IncorporarPredioUnidadespacial():
     
@@ -46,6 +47,37 @@ class IncorporarPredioUnidadespacial():
             .filter(**filter_kwargs)
             .select_related('predio_unidadespacial')
         )
+
+    def conservar_y_relacionar_geometria(self, instance_predio_novedad, instance_predio_actual):
+        """
+        Conserva la geometría (terreno y unidades) del predio actual y la relaciona
+        con el nuevo predio (novedad) creando copias de sus relaciones en PredioUnidadespacial.
+        """
+        # 1. Obtener todas las relaciones espaciales del predio actual (terrenos y unidades)
+        relaciones_actuales = PredioUnidadespacial.objects.filter(predio=instance_predio_actual)
+
+        if not relaciones_actuales.exists():
+            raise ValidationError(f"El predio activo {instance_predio_actual.numero_predial_nacional} no tiene unidades espaciales asociadas.")
+
+        # 2. Preparar una lista de nuevas relaciones para crear
+        nuevas_relaciones = []
+        for relacion_actual in relaciones_actuales:
+            nuevas_relaciones.append(
+                PredioUnidadespacial(
+                    predio=instance_predio_novedad,
+                    terreno=relacion_actual.terreno,
+                    unidadconstruccion=relacion_actual.unidadconstruccion,
+                    local_id=relacion_actual.local_id
+                )
+            )
+        
+        # 3. Crear todas las nuevas relaciones en una sola transacción
+        if nuevas_relaciones:
+            PredioUnidadespacial.objects.bulk_create(nuevas_relaciones)
+        
+        # Devolver el predio novedad y las nuevas relaciones creadas
+        unidades_creadas = list(PredioUnidadespacial.objects.filter(predio=instance_predio_novedad))
+        return instance_predio_novedad, unidades_creadas
 
     def procesar_tipo_unidadespacial(self, list_json, tipo_dato, campo_modelo, otro_tipo_dato):
         """
