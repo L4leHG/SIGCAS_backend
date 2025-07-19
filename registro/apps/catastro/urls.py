@@ -6,7 +6,7 @@ from .views import (
     RadicadoPredioAsignadoCreateView, RadicadoPredioAsignadoUpdateView, UserListView,
     RadicadoPredioAsignadoListView, RadicadoPredioAsignadoDeleteView,
     RadicadoDeleteView, RadicadoPredioAsignadoUpdateView, RadicadoPredioAsignadoListView,RadicadoPredioAsignadoCreateView,
-    ProcesarMutacionView, ConsultarEstadoMutacionView, VerificarTransaccionalidadView, ProcesarGeometriaView, FinalizarTramiteView,
+    ProcesarMutacionView, ConsultarEstadoMutacionView, VerificarTransaccionalidadView, ProcesarGeometriaView, FinalizarTramiteView, GenerarResolucionPDFView,
  ######******DOMINIOS
     DominiosPredioView, DominiosInteresadoView, DominiosFuenteAdministrativaView, DominiosUnidadConstruccionView,
     UnidadAdministrativaBasicaTipoView, EstadoAsignacionView, MutacionTipoView,
@@ -17,7 +17,7 @@ urlpatterns = [
 
     ##Detalle Predio
     path('detalle_predios/', PredioDetalleAPIView.as_view(), name='predio-lista-detalle'),
-    ##Previzualición de la información del Predio
+    ##Previzualización de la información del Predio
     path('preview_predios/', PredioPreView.as_view(), name='predio-preview'),
 
 
@@ -54,6 +54,8 @@ urlpatterns = [
     path('api/mutacion/verificar-transaccion/', VerificarTransaccionalidadView.as_view(), name='verificar_transaccionalidad'),
     ##Finalizar un tramite
     path('api/tramites/<int:tramite_id>/finalizar/', FinalizarTramiteView.as_view(), name='finalizar_tramite'),
+    ##Generar PDF de la resolución
+    path('api/tramite/<int:tramite_id>/resolucion-pdf/', GenerarResolucionPDFView.as_view(), name='resolucion_pdf'),
 
     ###############***********ENDPOINTS DE USUARIOS
     path('api/usuarios/', UserListView.as_view(), name='listar_usuarios'),

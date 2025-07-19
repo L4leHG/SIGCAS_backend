@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Resolución {{ data.numero_resolucion }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        body {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            font-size: 11px;
+            line-height: 1.5;
+            color: #333;
+        }
+        h1, h2, h3 {
+            font-weight: bold;
+            color: #000;
+        }
+        h1 {
+            text-align: center;
+            font-size: 18px;
+            border-bottom: 2px solid #000;
+            padding-bottom: 10px;
+            margin-bottom: 30px;
+        }
+        h2 {
+            font-size: 16px;
+            color: #444;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            padding-bottom: 5px;
+        }
+        h3 {
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+            vertical-align: top;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        .section {
+            margin-bottom: 40px;
+            page-break-inside: avoid;
+        }
+        .header-info {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .data-table th {
+            text-align: center;
+            font-size: 10px;
+        }
+        .data-table td {
+            text-align: left;
+        }
+        p {
+            text-align: justify;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>RESOLUCIÓN No. {{ data.numero_resolucion }}</h1>
+
+    <div class="header-info">
+        <strong>POR LA CUAL SE ORDENA REALIZAR CAMBIOS EN LA BASE DE DATOS CATASTRAL</strong> <br>
+        <strong>Fecha de Resolución:</strong> {{ data.fecha_resolucion }}
+    </div>
+
+    <p>primer parrafo aqui</p>
+
+    <h3 style="text-align: center;">CONSIDERANDO</h3>
+
+    <p>segundo parrafo aqui</p>
+
+    <h3 style="text-align: center;">RESUELVE</h3>
+
+
+    <!-- Sección para el predio cancelado -->
+    {% if data.predio_cancelado %}
+    <div class="section">
+        <h3>INFORMACIÓN CANCELADA</h3>
+        <p><strong>Número Predial Nacional:</strong> {{ data.predio_cancelado.numero_predial_nacional }}</p>
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>DIRECCIÓN</th>
+                    <th>MATRÍCULA INMOBILIARIA</th>
+                    <th>DESTINACIÓN ECONÓMICA</th>
+                    <th>AVALÚO CATASTRAL</th>
+                    <th>VIGENCIA</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>{{ data.predio_cancelado.direccion|default:"N/A" }}</td>
+                    <td>{{ data.predio_cancelado.matricula_inmobiliaria }}</td>
+                    <td>{{ data.predio_cancelado.destinacion_economica|default:"N/A" }}</td>
+                    {% with avaluo=data.predio_cancelado.avaluo.0 %}
+                        {% if avaluo %}
+                            <td>${{ avaluo.avaluo_catastral|floatformat:0 }}</td>
+                            <td>{{ avaluo.vigencia }}</td>
+                        {% else %}
+                            <td colspan="2">No registrado</td>
+                        {% endif %}
+                    {% endwith %}
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Interesados</h3>
+        {% if data.predio_cancelado.interesado %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>PROPIETARIO</th>
+                    <th>TIPO DE IDENTIFICACIÓN</th>
+                    <th>NÚMERO DE IDENTIFICACIÓN</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for interesado in data.predio_cancelado.interesado %}
+                <tr>
+                    <td>{{ interesado.nombre|default:interesado.razon_social }}</td>
+                    <td>{{ interesado.tipo_documento }}</td>
+                    <td>{{ interesado.numero_documento }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+            <p>No se encontraron interesados.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Sección para los predios inscritos -->
+    {% for predio in data.predios_inscritos %}
+    <div class="section">
+        <h3>INFORMACIÓN INSCRITA</h3>
+        <p><strong>Número Predial Nacional:</strong> {{ predio.numero_predial_nacional }}</p>
+
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>DIRECCIÓN</th>
+                    <th>MATRÍCULA INMOBILIARIA</th>
+                    <th>DESTINACIÓN ECONÓMICA</th>
+                    <th>AVALÚO CATASTRAL</th>
+                    <th>VIGENCIA</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>{{ predio.direccion|default:"N/A" }}</td>
+                    <td>{{ predio.matricula_inmobiliaria }}</td>
+                    <td>{{ predio.destinacion_economica|default:"N/A" }}</td>
+                    {% with avaluo=predio.avaluo.0 %}
+                        {% if avaluo %}
+                            <td>${{ avaluo.avaluo_catastral|floatformat:0 }}</td>
+                            <td>{{ avaluo.vigencia }}</td>
+                        {% else %}
+                            <td colspan="2">No registrado</td>
+                        {% endif %}
+                    {% endwith %}
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Interesados</h3>
+        {% if predio.interesado %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>PROPIETARIO</th>
+                    <th>TIPO DE IDENTIFICACIÓN</th>
+                    <th>NÚMERO DE IDENTIFICACIÓN</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for interesado in predio.interesado %}
+                <tr>
+                    <td>{{ interesado.nombre|default:interesado.razon_social }}</td>
+                    <td>{{ interesado.tipo_documento }}</td>
+                    <td>{{ interesado.numero_documento }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+            <p>No se encontraron interesados.</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+</body>
+</html> 

@@ -22,7 +22,9 @@ from registro.apps.catastro.models import (
     CrMutaciontipo,
     ColRelacionsuperficietipo,
     CrConstruccionplantatipo,
-    User
+    User,
+    TramiteCatastral,
+    Historial_predio
 )
 from registro.apps.users.models import Rol_predio
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
@@ -163,6 +165,7 @@ class EstructuraAvaluoSerializer(serializers.ModelSerializer):
         ]
 
 class PredioSerializer(serializers.ModelSerializer):
+    
     terreno_geo = serializers.SerializerMethodField()
     unidades_construccion_geo = serializers.SerializerMethodField()
     terreno_alfa = serializers.SerializerMethodField()
@@ -479,102 +482,107 @@ class RadicadoListSerializer(serializers.ModelSerializer):
         if obj.tipo_documento:
             return obj.tipo_documento.ilicode
         return None
-    
 
+
+class RadicadoListCreateSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        radicados = [self.child.create(item) for item in validated_data]
+        return radicados
         
 class SerializerRadicado(serializers.Serializer):
-    tipo_documento = serializers.CharField()
-    tipo_interesado = serializers.CharField()
+    tipo_documento = serializers.IntegerField()
+    tipo_interesado = serializers.IntegerField()
     numero_radicado = serializers.CharField()
     fecha_radicado = serializers.DateField()
     nombre_solicitante = serializers.CharField()
     numero_documento = serializers.CharField()
-    oficio = serializers.CharField(allow_blank=True, required=False)
+    oficio = serializers.BooleanField(required=False)
+
+    class Meta:
+        list_serializer_class = RadicadoListCreateSerializer
 
     def validate(self, data):
-        tipo_documento = data.get('tipo_documento')
-        tipo_interesado = data.get('tipo_interesado')
-        numero_documento = data.get('numero_documento')
-        numero_radicado = data.get('numero_radicado')
-
-        # Validar existencia de ilicode en la base de datos
+        # Validar tipo_documento por ID
         try:
-            doc = ColDocumentotipo.objects.get(ilicode=tipo_documento)
+            tipo_doc_id = data.get('tipo_documento')
+            tipo_documento_instance = ColDocumentotipo.objects.get(t_id=tipo_doc_id)
+            data['tipo_documento_instance'] = tipo_documento_instance
         except ColDocumentotipo.DoesNotExist:
-            raise serializers.ValidationError({"tipo_documento": "Tipo de documento inválido (ilicode no encontrado)."})
- 
+            raise ValidationError({'tipo_documento': 'ID de tipo de documento inválido.'})
+
+        # Validar tipo_interesado por ID
         try:
-            interesado = ColInteresadotipo.objects.get(ilicode=tipo_interesado)
+            tipo_interesado_id = data.get('tipo_interesado')
+            tipo_interesado_instance = ColInteresadotipo.objects.get(t_id=tipo_interesado_id)
+            data['tipo_interesado_instance'] = tipo_interesado_instance
         except ColInteresadotipo.DoesNotExist:
-            raise serializers.ValidationError({"tipo_interesado": "Tipo de interesado inválido (ilicode no encontrado)."})
+            raise ValidationError({'tipo_interesado': 'ID de tipo de interesado inválido.'})
 
-        # Validar número de radicado único solo si se está modificando
+        # --- VALIDACIONES DE NEGOCIO RESTAURADAS ---
+        numero_radicado = data.get('numero_radicado')
+        numero_documento = data.get('numero_documento')
+
+        # Validar número de radicado único
         instance = getattr(self, 'instance', None)
+        query = Radicado.objects.filter(numero_radicado=numero_radicado)
         if instance:
-            # Si es una actualización, solo validar si el número de radicado está en los datos
-            if 'numero_radicado' in data and numero_radicado != instance.numero_radicado:
-                if Radicado.objects.filter(numero_radicado=numero_radicado).exclude(id=instance.id).exists():
-                    raise serializers.ValidationError({"numero_radicado": "Ya existe un radicado con este número."})
-        else:
-            # Si es una creación, verificar que el número no exista
-            if Radicado.objects.filter(numero_radicado=numero_radicado).exists():
-                raise serializers.ValidationError({"numero_radicado": "Ya existe un radicado con este número."})
+            query = query.exclude(id=instance.id)
+        if query.exists():
+            raise ValidationError({"numero_radicado": "Ya existe un radicado con este número."})
 
-        # Validaciones usando ilicode directamente
-        if tipo_interesado == "Persona_Natural":
-            if tipo_documento == "NIT":
-                raise serializers.ValidationError({
+        # Validaciones de consistencia entre tipo de interesado y tipo de documento
+        if tipo_interesado_instance.ilicode == "Persona_Natural":
+            if tipo_documento_instance.ilicode == "NIT":
+                raise ValidationError({
                     "tipo_documento": "Una Persona Natural no puede tener tipo de documento NIT."
                 })
-            elif tipo_documento == "Pasaporte":
-                pass  # se permiten letras y números
-            else:
-                if not numero_documento.isdigit():
-                    raise serializers.ValidationError({
-                        "numero_documento": "Para Personas Naturales (excepto pasaporte), solo se permiten dígitos."
-                    })
+            # Permitir letras y números para Pasaporte, solo dígitos para los demás
+            if tipo_documento_instance.ilicode != "Pasaporte" and not numero_documento.isdigit():
+                raise ValidationError({
+                    "numero_documento": "Para Personas Naturales (excepto pasaporte), el documento solo debe contener números."
+                })
 
-        elif tipo_interesado == "Persona_Juridica":
-            if tipo_documento != "NIT":
-                raise serializers.ValidationError({
+        elif tipo_interesado_instance.ilicode == "Persona_Juridica":
+            if tipo_documento_instance.ilicode != "NIT":
+                raise ValidationError({
                     "tipo_documento": "Una Persona Jurídica solo puede tener tipo de documento NIT."
                 })
+            # Validar formato de NIT (números y guion opcional)
             if not re.fullmatch(r"[0-9\-]+", numero_documento):
-                raise serializers.ValidationError({
-                    "numero_documento": "Para Personas Jurídicas, solo se permiten números y guiones."
-                })
+                 raise ValidationError({
+                     "numero_documento": "Para Personas Jurídicas, el NIT solo debe contener números y un guion."
+                 })
 
         return data
 
     def create(self, validated_data):
-        # Relacionar instancias reales por ilicode
-        doc = ColDocumentotipo.objects.get(ilicode=validated_data['tipo_documento'])
-        interesado = ColInteresadotipo.objects.get(ilicode=validated_data['tipo_interesado'])
+        try:
+            radicado_obj = Radicado.objects.create(
+                numero_radicado=validated_data['numero_radicado'],
+                fecha_radicado=validated_data['fecha_radicado'],
+                nombre_solicitante=validated_data['nombre_solicitante'],
+                numero_documento=validated_data['numero_documento'],
+                oficio=validated_data.get('oficio', False),
+                tipo_documento=validated_data['tipo_documento_instance'],
+                tipo_interesado=validated_data['tipo_interesado_instance']
+            )
+            return radicado_obj
+        except Exception as e:
+            raise APIException(f"Error al crear el radicado: {str(e)}")
 
-        return Radicado.objects.create(
-            tipo_documento=doc,
-            tipo_interesado=interesado,
-            numero_radicado=validated_data['numero_radicado'],
-            fecha_radicado=validated_data['fecha_radicado'],
-            nombre_solicitante=validated_data['nombre_solicitante'],
-            numero_documento=validated_data['numero_documento'],
-            oficio=validated_data.get('oficio', '')
-        )
-    
     def update(self, instance, validated_data):
-         # Si se desea cambiar tipo_documento o tipo_interesado
-        if 'tipo_documento' in validated_data:
-            instance.tipo_documento = ColDocumentotipo.objects.get(ilicode=validated_data['tipo_documento'])
-        if 'tipo_interesado' in validated_data:
-            instance.tipo_interesado = ColInteresadotipo.objects.get(ilicode=validated_data['tipo_interesado'])
-        
         instance.numero_radicado = validated_data.get('numero_radicado', instance.numero_radicado)
         instance.fecha_radicado = validated_data.get('fecha_radicado', instance.fecha_radicado)
         instance.nombre_solicitante = validated_data.get('nombre_solicitante', instance.nombre_solicitante)
         instance.numero_documento = validated_data.get('numero_documento', instance.numero_documento)
         instance.oficio = validated_data.get('oficio', instance.oficio)
-
-
+        
+        # Actualizar relaciones si se proporcionaron IDs
+        if 'tipo_documento_instance' in validated_data:
+            instance.tipo_documento = validated_data['tipo_documento_instance']
+        if 'tipo_interesado_instance' in validated_data:
+            instance.tipo_interesado = validated_data['tipo_interesado_instance']
+            
         instance.save()
         return instance
 
@@ -590,13 +598,14 @@ class RadicadoPredioAsignadoSerializer(serializers.ModelSerializer):
     mutacion = serializers.SerializerMethodField()
     usuario_analista = serializers.SerializerMethodField()
     usuario_coordinador = serializers.SerializerMethodField()
+    tramite_catastral_id = serializers.SerializerMethodField()
 
     class Meta:
         model = RadicadoPredioAsignado
         fields = [
             'id', 'radicado_id', 'numero_radicado', 'predio_id', 'numero_predial_nacional',
             'estado_asignacion', 'mutacion', 'usuario_analista',
-            'usuario_coordinador'
+            'usuario_coordinador', 'tramite_catastral_id'
         ]
     
     def get_radicado_id(self, obj):
@@ -625,146 +634,125 @@ class RadicadoPredioAsignadoSerializer(serializers.ModelSerializer):
 
     def get_usuario_coordinador(self, obj):
         if obj.usuario_coordinador:
-            serializer = UserSerializer(obj.usuario_coordinador)
-            return serializer.data['nombre_completo']
+            return f"{obj.usuario_coordinador.first_name} {obj.usuario_coordinador.last_name}"
         return None
+
+    def get_tramite_catastral_id(self, obj):
+        """
+        Obtiene el ID del trámite catastral más reciente asociado a esta asignación.
+        """
+        tramite = TramiteCatastral.objects.filter(radicado_asignado=obj).order_by('-id').first()
+        if tramite:
+            return tramite.id
+        return None
+
+class RadicadoPredioAsignadoListCreateSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        asignaciones = [self.child.create(item) for item in validated_data]
+        return asignaciones
 
 class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
     numero_radicado = serializers.CharField()
     estado_asignacion = serializers.CharField(required=False, default="Pendiente")
-    usuario_analista = serializers.CharField(required=False, allow_null=True)
-    usuario_coordinador = serializers.CharField(required=False, allow_null=True)
-    mutacion = serializers.CharField()
+    usuario_analista = serializers.IntegerField(required=False, allow_null=True)
+    usuario_coordinador = serializers.IntegerField(required=False, allow_null=True)
+    mutacion = serializers.IntegerField()
     numero_predial_nacional = serializers.CharField()
 
-    def _get_user_full_name(self, full_name):
-        if not full_name:
+    class Meta:
+        list_serializer_class = RadicadoPredioAsignadoListCreateSerializer
+
+    def _get_user_by_id(self, user_id):
+        if not user_id:
             return None
-        
         try:
-            # Buscar usuarios activos
-            usuarios = User.objects.filter(is_active=True)
-            
-            # Usar el UserSerializer para obtener el nombre_completo de cada usuario
-            for usuario in usuarios:
-                serializer = UserSerializer(usuario)
-                if serializer.data['nombre_completo'].lower() == full_name.lower():
-                    return usuario
-            
+            return User.objects.get(id=user_id)
+        except User.DoesNotExist:
             return None
-        except Exception as e:
-            raise serializers.ValidationError(f"Error al buscar usuario: {str(e)}")
 
     def validate(self, data):
-        # Validar que el radicado exista por número de radicado
+        # Validar radicado
         try:
-            radicados = Radicado.objects.filter(numero_radicado=data['numero_radicado'])
-            if not radicados.exists():
-                raise serializers.ValidationError("El radicado no existe.")
-            if radicados.count() > 1:
-                raise serializers.ValidationError(
-                    f"Existen múltiples radicados con el número {data['numero_radicado']}. Por favor, contacte al administrador."
-                )
-            radicado = radicados.first()
-        except Exception as e:
-            raise serializers.ValidationError(str(e))
+            radicado_instance = Radicado.objects.get(numero_radicado=data['numero_radicado'])
+            data['radicado_instance'] = radicado_instance
+        except Radicado.DoesNotExist:
+            raise ValidationError({'numero_radicado': f"El radicado '{data['numero_radicado']}' no existe."})
 
-        # Validar que el predio exista por NPN y esté en estado activo
+        # Validar estado de asignación
         try:
-            predio = Predio.objects.filter(
-                numero_predial_nacional=data['numero_predial_nacional'],
-                estado__ilicode='Activo'
-            ).first()
-            if not predio:
-                raise serializers.ValidationError("El predio no existe o no está en estado activo.")
-        except Exception as e:
-            raise serializers.ValidationError(str(e))
-
-        # Validar que el estado de asignación exista
-        try:
-            estado = EstadoAsignacion.objects.get(ilicode=data.get('estado_asignacion', 'Pendiente'))
+            estado_asignacion_instance = EstadoAsignacion.objects.get(ilicode=data['estado_asignacion'])
+            data['estado_asignacion_instance'] = estado_asignacion_instance
         except EstadoAsignacion.DoesNotExist:
-            raise serializers.ValidationError("El estado de asignación no existe.")
+            raise ValidationError({'estado_asignacion': f"El estado de asignación '{data['estado_asignacion']}' no es válido."})
 
-        # Validar que la mutación exista
+        # Validar usuarios por ID
+        usuario_analista_id = data.get('usuario_analista')
+        usuario_coordinador_id = data.get('usuario_coordinador')
+        
+        analista_instance = self._get_user_by_id(usuario_analista_id)
+        coordinador_instance = self._get_user_by_id(usuario_coordinador_id)
+
+        if usuario_analista_id and not analista_instance:
+            raise ValidationError({'usuario_analista': f"El usuario analista con ID '{usuario_analista_id}' no existe."})
+        
+        if usuario_coordinador_id and not coordinador_instance:
+            raise ValidationError({'usuario_coordinador': f"El usuario coordinador con ID '{usuario_coordinador_id}' no existe."})
+
+        data['usuario_analista_instance'] = analista_instance
+        data['usuario_coordinador_instance'] = coordinador_instance
+
+        # Validar mutación por ID
         try:
-            mutacion = CrMutaciontipo.objects.get(ilicode=data['mutacion'])
+            mutacion_id = data['mutacion']
+            mutacion_instance = CrMutaciontipo.objects.get(t_id=mutacion_id)
+            data['mutacion_instance'] = mutacion_instance
         except CrMutaciontipo.DoesNotExist:
-            raise serializers.ValidationError("La mutación no existe.")
+            raise ValidationError({'mutacion': f"El tipo de mutación con ID '{mutacion_id}' no es válido."})
+        except KeyError:
+            raise ValidationError({'mutacion': 'El campo mutación es obligatorio.'})
 
-        # Validar y obtener usuarios si se proporcionan
-        if data.get('usuario_analista'):
-            usuario_analista = self._get_user_full_name(data['usuario_analista'])
-            if not usuario_analista:
-                raise serializers.ValidationError("No se encontró un usuario analista con ese nombre.")
-            self.validated_analista = usuario_analista
-
-        if data.get('usuario_coordinador'):
-            usuario_coordinador = self._get_user_full_name(data['usuario_coordinador'])
-            if not usuario_coordinador:
-                raise serializers.ValidationError("No se encontró un usuario coordinador con ese nombre.")
-            self.validated_coordinador = usuario_coordinador
-
-        # Validar que no exista una asignación previa para este radicado y predio
-        if not self.instance:  # Solo validar en creación
-            if RadicadoPredioAsignado.objects.filter(
-                radicado=radicado,
-                predio=predio
-            ).exists():
-                raise serializers.ValidationError(
-                    "Ya existe una asignación para este radicado y predio."
-                )
-
-        # Guardar el radicado y predio validados
-        self.validated_radicado = radicado
-        self.validated_predio = predio
-        self.validated_estado = estado
-        self.validated_mutacion = mutacion
+        # Validar predio
+        try:
+            predio_instance = Predio.objects.get(numero_predial_nacional=data['numero_predial_nacional'])
+            data['predio_instance'] = predio_instance
+        except Predio.DoesNotExist:
+            raise ValidationError({'numero_predial_nacional': f"El predio '{data['numero_predial_nacional']}' no existe."})
 
         return data
 
     def create(self, validated_data):
-        # Usar el radicado y predio ya validados
-        radicado = self.validated_radicado
-        predio = self.validated_predio
-        estado = self.validated_estado
-        mutacion = self.validated_mutacion
-        
-        # Usar los usuarios ya validados
-        usuario_analista = getattr(self, 'validated_analista', None)
-        usuario_coordinador = getattr(self, 'validated_coordinador', None)
+        radicado_instance = validated_data['radicado_instance']
+        predio_instance = validated_data['predio_instance']
 
-        # Crear la asignación
+        # Verificar si ya existe una asignación para este radicado y predio
+        if RadicadoPredioAsignado.objects.filter(radicado=radicado_instance, predio=predio_instance).exists():
+            raise ValidationError(f"El predio {predio_instance.numero_predial_nacional} ya está asignado al radicado {radicado_instance.numero_radicado}.")
+
         asignacion = RadicadoPredioAsignado.objects.create(
-            radicado=radicado,
-            predio=predio,
-            estado_asignacion=estado,
-            mutacion=mutacion,
-            usuario_analista=usuario_analista,
-            usuario_coordinador=usuario_coordinador
+            radicado=radicado_instance,
+            estado_asignacion=validated_data['estado_asignacion_instance'],
+            usuario_analista=validated_data['usuario_analista_instance'],
+            usuario_coordinador=validated_data['usuario_coordinador_instance'],
+            mutacion=validated_data['mutacion_instance'],
+            predio=predio_instance
         )
-
-        # Actualizar el estado de asignación del radicado
-        radicado.asignado = True
-        radicado.save()
-
         return asignacion
-    
+
     def update(self, instance, validated_data):
         # Actualizar estado de asignación
-        if 'estado_asignacion' in validated_data:
-            instance.estado_asignacion = self.validated_estado
-
-        # Actualizar mutación
-        if 'mutacion' in validated_data:
-            instance.mutacion = self.validated_mutacion
+        if 'estado_asignacion_instance' in validated_data:
+            instance.estado_asignacion = validated_data['estado_asignacion_instance']
 
         # Actualizar usuarios
         if 'usuario_analista' in validated_data:
-            instance.usuario_analista = getattr(self, 'validated_analista', None)
-        
+            instance.usuario_analista = validated_data.get('usuario_analista_instance')
+
         if 'usuario_coordinador' in validated_data:
-            instance.usuario_coordinador = getattr(self, 'validated_coordinador', None)
+            instance.usuario_coordinador = validated_data.get('usuario_coordinador_instance')
+
+        # Actualizar mutación
+        if 'mutacion_instance' in validated_data:
+            instance.mutacion = validated_data['mutacion_instance']
 
         instance.save()
         return instance
@@ -850,3 +838,68 @@ class MutacionRadicadoValidationSerializer(serializers.Serializer):
         attrs['mutacion_tipo'] = asignacion.mutacion.ilicode
 
         return attrs
+
+
+class ResolucionPredioDataSerializer(serializers.ModelSerializer):
+    """Serializer para la información específica de un predio en la resolución."""
+    avaluo = EstructuraAvaluoSerializer(many=True, source='estructuraavaluo_set')
+    interesado = serializers.SerializerMethodField()
+    destinacion_economica = serializers.CharField(source='destinacion_economica.ilicode', read_only=True)
+    matricula_inmobiliaria = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Predio
+        fields = [
+            'numero_predial_nacional',
+            'direccion',
+            'matricula_inmobiliaria',
+            'destinacion_economica',
+            'avaluo',
+            'interesado'
+        ]
+        
+    def get_matricula_inmobiliaria(self, obj):
+        if obj.codigo_orip and obj.matricula_inmobiliaria:
+            return f"{obj.codigo_orip}-{obj.matricula_inmobiliaria}"
+        return "N/A"
+    
+    def get_interesado(self, obj):
+        # El modelo Predio no tiene una relación directa 'interesadopredio_set'
+        # La relación está en InteresadoPredio.
+        interesados_predio = InteresadoPredio.objects.filter(predio=obj)
+        interesados = [ip.interesado for ip in interesados_predio]
+        return InteresadoSerializer(interesados, many=True).data
+
+class ResolucionSerializer(serializers.ModelSerializer):
+    """
+    Serializer para orquestar los datos necesarios para el PDF de la resolución.
+    """
+    predio_cancelado = serializers.SerializerMethodField()
+    predios_inscritos = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = TramiteCatastral
+        fields = [
+            'numero_resolucion',
+            'fecha_resolucion',
+            'predio_cancelado',
+            'predios_inscritos'
+        ]
+        
+    def get_predio_cancelado(self, obj):
+        """Obtiene y serializa la información del predio original (el que se cancela)."""
+        if not obj.radicado_asignado or not obj.radicado_asignado.predio:
+            return None
+        predio_original = obj.radicado_asignado.predio
+        return ResolucionPredioDataSerializer(predio_original).data
+
+    def get_predios_inscritos(self, obj):
+        """Obtiene y serializa la información de los nuevos predios (los que se inscriben)."""
+        historial_entries = Historial_predio.objects.filter(
+            predio_tramitecatastral__tramite_catastral=obj
+        ).select_related('predio')
+        
+        predios_novedad_ids = historial_entries.values_list('predio_id', flat=True).distinct()
+        predios_novedad = Predio.objects.filter(id__in=predios_novedad_ids)
+        
+        return ResolucionPredioDataSerializer(predios_novedad, many=True).data

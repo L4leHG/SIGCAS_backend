@@ -45,7 +45,8 @@ from .serializers import (
     CrUnidadconstrucciontipoSerializer, CrUsouconstipoSerializer, CrConstruccionplantatipoSerializer,
     ColUnidadadministrativabasicatipoSerializer,
     EstadoAsignacionSerializer, CrMutaciontipoSerializer, RadicadoListSerializer,
-    RadicadoPredioAsignadoEditSerializer, UserSerializer, RadicadoPredioAsignadoSerializer
+    RadicadoPredioAsignadoEditSerializer, UserSerializer, RadicadoPredioAsignadoSerializer,
+    ResolucionSerializer
 )
 
 from registro.apps.catastro.models import RadicadoPredioAsignado
@@ -82,77 +83,87 @@ class PredioPreView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        try:
-            predio = Predio.objects.get(numero_predial_nacional=numero_predial)
-        except Predio.DoesNotExist:
-            return Response(
-                {"error": "No se encontró un predio con ese número predial."},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        # Cambiado a 'filter' para búsqueda parcial y devolver una lista
+        predios = Predio.objects.filter(numero_predial_nacional__icontains=numero_predial)
 
-        # Creamos una instancia del serializer con los campos específicos
-        serializer = PredioSerializer(predio)
-        # Filtramos los campos que queremos en la respuesta
-        data = {
-            'id':serializer.data.get('id'),
-            'npn': serializer.data.get('numero_predial_nacional'),
-            'direccion': serializer.data.get('direccion'),
-            'area total': serializer.data.get('area_catastral_terreno'),
-            'orip_matricula':serializer.data.get('orip_matricula'),
-            'estado': serializer.data.get('estado'),
+        if not predios.exists():
+            # Devolver una lista vacía si no hay resultados, en lugar de un error 404
+            return Response([], status=status.HTTP_200_OK)
 
-        }
-        return Response(data)
+        serializer = PredioSerializer(predios, many=True)
+        
+        # Crear una lista de resultados simplificados
+        response_data = []
+        for predio_data in serializer.data:
+            response_data.append({
+                'id': predio_data.get('id'),
+                'npn': predio_data.get('numero_predial_nacional'),
+                'direccion': predio_data.get('direccion'),
+                'area total': predio_data.get('area_catastral_terreno'),
+                'orip_matricula': predio_data.get('orip_matricula'),
+                'estado': predio_data.get('estado'),
+                'nombre_interesado': predio_data.get('interesado')
+            })
+            
+        return Response(response_data)
     
 
 class PredioDetalleAPIView(APIView):
     def get(self, request):
         numero_predial = request.query_params.get('numero_predial_nacional')
+        predio_id = request.query_params.get('predio_id')
         formato = request.query_params.get('formato', 'json')  # Por defecto retorna JSON
 
-        if not numero_predial:
-            return Response(
-                {"error": "Debe proporcionar el parámetro 'numero_predial_nacional'."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Usamos filter() para obtener todos los registros coincidentes
-        predios = Predio.objects.filter(numero_predial_nacional=numero_predial)
-
-        if not predios.exists():
-            return Response(
-                {"error": "No se encontraron predios con ese número predial."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        if formato.lower() == 'pdf':
-            predio_id = request.query_params.get('predio_id')
-            if not predio_id:
-                return Response(
-                    {"error": "Para generar un PDF, debe proporcionar el parámetro 'predio_id'."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
+        # Búsqueda prioritaria por ID de predio si se proporciona
+        if predio_id:
             try:
-                # Nos aseguramos que el predio solicitado por ID pertenezca al NPN consultado
-                predio_para_pdf = predios.get(id=predio_id)
+                predio = Predio.objects.get(id=predio_id)
                 
-                serializer = PredioSerializer(predio_para_pdf)
-                return serializer.generate_pdf(serializer.data, numero_predial)
+                # Si se proporciona NPN, validar que coincida con el del predio encontrado
+                if numero_predial and predio.numero_predial_nacional != numero_predial:
+                    return Response(
+                        {"error": f"El predio con ID {predio_id} no corresponde al número predial {numero_predial}."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                serializer = PredioSerializer(predio)
+                if formato.lower() == 'pdf':
+                    try:
+                        return serializer.generate_pdf(serializer.data, predio.numero_predial_nacional)
+                    except Exception as e:
+                        return Response({"error": "Ocurrió un error al generar el PDF"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+                return Response(serializer.data)
+                
             except Predio.DoesNotExist:
+                return Response({"error": f"No se encontró un predio con el ID {predio_id}."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Búsqueda por número predial nacional si no se proporciona ID
+        if numero_predial:
+            predios = Predio.objects.filter(numero_predial_nacional=numero_predial)
+
+            if not predios.exists():
                 return Response(
-                    {"error": f"No se encontró un predio con ID {predio_id} para el número predial {numero_predial}."},
+                    {"error": f"No se encontraron predios con el número predial {numero_predial}."},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            except Exception as e:
+
+            # Si se pide un PDF en una búsqueda por NPN sin ID, es ambiguo
+            if formato.lower() == 'pdf':
                 return Response(
-                    {"error": "Ocurrió un error al generar el PDF"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    {"error": "Para generar un PDF, debe proporcionar el 'predio_id' del registro específico."},
+                    status=status.HTTP_400_BAD_REQUEST
                 )
 
-        # Para JSON, serializamos todos los resultados encontrados
-        serializer = PredioSerializer(predios, many=True)
-        return Response(serializer.data)
+            # Para JSON, serializamos todos los resultados encontrados
+            serializer = PredioSerializer(predios, many=True)
+            return Response(serializer.data)
+
+        # Si no se proporciona ningún identificador
+        return Response(
+            {"error": "Debe proporcionar el 'numero_predial_nacional'."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
 #### ********************************* VIEWS PARA DOMINIOS *********************************
 
@@ -272,21 +283,30 @@ class RadicadoView(generics.CreateAPIView):
     permission_classes = [IsConsultaAmindUser]
     authentication_classes = [CookieJWTAuthentication]
 
+    def get_serializer(self, *args, **kwargs):
+        if isinstance(kwargs.get('data', {}), list):
+            kwargs['many'] = True
+        return super().get_serializer(*args, **kwargs)
+
     def create(self, request, *args, **kwargs):
         try:
-
-            # Validar y crear el radicado
+            # Validar y crear el/los radicado(s)
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
-            instance = self.perform_create(serializer)
+            instances = serializer.save()
+
+            # Determinar si se crearon uno o varios para la respuesta
+            is_many = isinstance(instances, list)
             
             # Log de éxito
-            logger.info(f"Radicado creado exitosamente.")
+            logger.info(f"Se crearon {len(instances) if is_many else 1} radicado(s) exitosamente.")
             
             # Serializar la respuesta
-            response_serializer = RadicadoListSerializer(instance)
+            response_serializer = RadicadoListSerializer(instances, many=is_many)
+            mensaje = "Se crearon los radicados exitosamente" if is_many else "Se creó el radicado exitosamente"
+            
             return Response({
-                "mensaje": "Se creó el radicado exitosamente",
+                "mensaje": mensaje,
                 "data": response_serializer.data
             }, status=status.HTTP_201_CREATED)
             
@@ -306,11 +326,7 @@ class RadicadoView(generics.CreateAPIView):
             )
 
     def perform_create(self, serializer):
-        try:
-            return serializer.save()
-        except Exception as e:
-            logger.error(f"Error al guardar el radicado: {str(e)}", exc_info=True)
-            raise
+        return serializer.save()
 
 class RadicadoUpdateView(generics.UpdateAPIView):
     queryset = Radicado.objects.all()
@@ -479,42 +495,31 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
     permission_classes = [IsConsultaAmindUser]
     authentication_classes = [CookieJWTAuthentication]
 
-    def create(self, request, *args, **kwargs):
-        is_many = isinstance(request.data, list)
-        try:
-            # Validar y crear la(s) asignación(es)
-            serializer = self.get_serializer(data=request.data, many=is_many)
-            serializer.is_valid(raise_exception=True)
-            
-            try:
-                instances = self.perform_create(serializer)
-                # Serializar la respuesta
-                response_serializer = RadicadoPredioAsignadoSerializer(instances, many=is_many)
-                
-                mensaje = "Se crearon las asignaciones exitosamente" if is_many else "Se creó la asignación exitosamente"
+    def get_serializer(self, *args, **kwargs):
+        if isinstance(kwargs.get('data', {}), list):
+            kwargs['many'] = True
+        return super().get_serializer(*args, **kwargs)
 
-                return Response({
-                    "mensaje": mensaje,
-                    "data": response_serializer.data
-                }, status=status.HTTP_201_CREATED)
-            except Exception as e:
-                logger.error(f"Error al guardar la(s) asignación(es): {str(e)}", exc_info=True)
-                raise ValidationError(f"Error al guardar la(s) asignación(es): {str(e)}")
+    def create(self, request, *args, **kwargs):
+        try:
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            instances = serializer.save()
+
+            is_many = isinstance(request.data, list)
+            response_serializer = RadicadoPredioAsignadoSerializer(instances, many=is_many)
+            
+            mensaje = "Se crearon las asignaciones exitosamente" if is_many else "Se creó la asignación exitosamente"
+
+            return Response({
+                "mensaje": mensaje,
+                "data": response_serializer.data
+            }, status=status.HTTP_201_CREATED)
             
         except ValidationError as e:
             return Response(
                 {"error": "Error de validación", "detalles": e.detail},
                 status=status.HTTP_400_BAD_REQUEST
-            )
-        except Radicado.DoesNotExist:
-            return Response(
-                {"error": "El radicado especificado no existe"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        except Predio.DoesNotExist:
-            return Response(
-                {"error": "El predio especificado no existe"},
-                status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
             logger.error(f"Error inesperado al crear asignación(es): {str(e)}", exc_info=True)
@@ -522,9 +527,6 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
                 {"error": "Ocurrió un error al procesar la solicitud"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
-    def perform_create(self, serializer):
-        return serializer.save()
 
 class RadicadoPredioAsignadoUpdateView(generics.UpdateAPIView):
     queryset = RadicadoPredioAsignado.objects.all()
@@ -977,9 +979,9 @@ class ConsultarEstadoMutacionView(APIView):
             tramites_data = []
             for tramite in tramites:
                 tramites_data.append({
+                    'tramite_id': tramite.id,
                     'numero_resolucion': tramite.numero_resolucion,
                     'fecha_resolucion': tramite.fecha_resolucion,
-                    'fecha_inscripcion': tramite.fecha_inscripcion,
                     'mutacion': tramite.mutacion.ilicode if tramite.mutacion else None
                 })
             
@@ -1128,3 +1130,44 @@ class FinalizarTramiteView(APIView):
         except Exception as e:
             logger.error(f"Error al finalizar el trámite {tramite_id}: {e}", exc_info=True)
             return Response({'error': 'Ocurrió un error inesperado durante la finalización del trámite.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class GenerarResolucionPDFView(APIView):
+    """
+    Vista para generar un PDF de resolución para un trámite catastral específico.
+    """
+    permission_classes = [IsAuthenticated] # O el permiso que consideres adecuado
+    authentication_classes = [CookieJWTAuthentication]
+
+    def get(self, request, tramite_id):
+        try:
+            # 1. Obtener el trámite catastral
+            tramite = TramiteCatastral.objects.get(id=tramite_id)
+        except TramiteCatastral.DoesNotExist:
+            return Response(
+                {'error': f'No se encontró un trámite con el ID {tramite_id}.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 2. Serializar los datos usando el nuevo orquestador
+        serializer = ResolucionSerializer(tramite)
+        datos_resolucion = serializer.data
+
+        # 3. Renderizar el template HTML con los datos
+        html_string = render_to_string('catastro/resolucion_pdf.html', {'data': datos_resolucion})
+        
+        # 4. Generar el PDF usando WeasyPrint
+        try:
+            html = HTML(string=html_string)
+            pdf = html.write_pdf()
+
+            response = HttpResponse(pdf, content_type='application/pdf')
+            response['Content-Disposition'] = f'inline; filename="resolucion_{tramite.numero_resolucion}.pdf"'
+            
+            return response
+        except Exception as e:
+            logger.error(f"Error generando PDF de resolución para trámite {tramite_id}: {e}", exc_info=True)
+            return Response(
+                {'error': 'Ocurrió un error al generar el PDF.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
