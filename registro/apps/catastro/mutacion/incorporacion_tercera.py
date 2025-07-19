@@ -106,15 +106,15 @@ class IncorporarMutacionTercera(
             predio (dict): Datos del predio con el nuevo destino económico
             instance_predio (Predio): Instancia del predio a modificar
         """
-        nuevo_destino = predio.get('destinacion_economica')
-        if nuevo_destino:
+        nuevo_destino_id = predio.get('destinacion_economica')
+        if nuevo_destino_id:
             try:
                 from registro.apps.catastro.models import CrDestinacioneconomicatipo
-                instancia_destinacion = CrDestinacioneconomicatipo.objects.get(ilicode=nuevo_destino)
+                instancia_destinacion = CrDestinacioneconomicatipo.objects.get(t_id=nuevo_destino_id)
                 instance_predio.destinacion_economica = instancia_destinacion
                 instance_predio.save()
             except CrDestinacioneconomicatipo.DoesNotExist:
-                raise ValidationError(f'El destino económico {nuevo_destino} no existe.')
+                raise ValidationError(f'El destino económico con ID {nuevo_destino_id} no existe.')
 
     def procesar_modificaciones_predio_existente(self, predio, instance_predio, instance_predio_actual, instance_resolucion_predio):
         """

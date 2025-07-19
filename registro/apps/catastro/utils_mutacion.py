@@ -1,80 +1,33 @@
 """
 Utilidades para el manejo de tipos de mutación catastral.
-
-Este módulo contiene funciones helper para trabajar con los tipos de mutación
-que tienen estructura como: "Mutacion_Primera_Clase.Cambio_Propietario"
 """
 
-def extraer_tipo_base_mutacion(ilicode_completo):
+def es_tipo_mutacion_soportado(tipo_id):
     """
-    Extrae el tipo base de mutación desde el ilicode completo.
+    Verifica si un tipo de mutación, dado su ID, está soportado por el sistema.
     
     Args:
-        ilicode_completo (str): El ilicode completo como "Mutacion_Primera_Clase.Cambio_Propietario"
+        tipo_id (int): El ID del tipo de mutación (ej: 1, 2, 3)
         
     Returns:
-        str: El tipo base como "Mutacion_Primera_Clase"
-        
-    Ejemplos:
-        >>> extraer_tipo_base_mutacion("Mutacion_Primera_Clase.Cambio_Propietario")
-        "Mutacion_Primera_Clase"
-        
-        >>> extraer_tipo_base_mutacion("Mutacion_Tercera_Clase.Incorporacion_Nueva")
-        "Mutacion_Tercera_Clase"
-        
-        >>> extraer_tipo_base_mutacion("Tipo_Simple")
-        "Tipo_Simple"
+        bool: True si está soportado, False en caso contrario.
     """
-    if not ilicode_completo:
-        return ""
-    
-    return ilicode_completo.split('.')[0] if '.' in ilicode_completo else ilicode_completo
+    tipos_soportados = [1, 3]  # IDs para Primera y Tercera Clase
+    return tipo_id in tipos_soportados
 
-
-def obtener_subtipo_mutacion(ilicode_completo):
+def validar_coherencia_mutacion(tipo_asignacion_id, tipo_datos_id):
     """
-    Extrae el subtipo de mutación desde el ilicode completo.
+    Valida que el tipo de mutación de la asignación coincida con los datos enviados.
     
     Args:
-        ilicode_completo (str): El ilicode completo como "Mutacion_Primera_Clase.Cambio_Propietario"
-        
-    Returns:
-        str: El subtipo como "Cambio_Propietario" o None si no existe
-        
-    Ejemplos:
-        >>> obtener_subtipo_mutacion("Mutacion_Primera_Clase.Cambio_Propietario")
-        "Cambio_Propietario"
-        
-        >>> obtener_subtipo_mutacion("Tipo_Simple")
-        None
-    """
-    if not ilicode_completo or '.' not in ilicode_completo:
-        return None
-    
-    partes = ilicode_completo.split('.', 1)  # Solo dividir en el primer punto
-    return partes[1] if len(partes) > 1 else None
-
-
-def validar_coherencia_mutacion(tipo_asignacion, tipo_datos):
-    """
-    Valida que el tipo de mutación de la asignación coincida exactamente con los datos enviados.
-    
-    Args:
-        tipo_asignacion (str): Tipo de mutación desde la asignación (completo, ej: "Mutacion_Primera_Clase.Cambio_Propietario")
-        tipo_datos (str): Tipo de mutación desde los datos JSON (debe ser igual al completo)
+        tipo_asignacion_id (int): ID del tipo de mutación desde la asignación.
+        tipo_datos_id (int): ID del tipo de mutación desde los datos JSON.
         
     Returns:
         tuple: (es_valido: bool, mensaje_error: str)
-        
-    Ejemplos:
-        >>> validar_coherencia_mutacion("Mutacion_Primera_Clase.Cambio_Propietario", "Mutacion_Primera_Clase.Cambio_Propietario")
-        (True, "")
-        
-        >>> validar_coherencia_mutacion("Mutacion_Primera_Clase.Cambio_Propietario", "Mutacion_Tercera_Clase.Incorporacion_Nueva")
-        (False, "La asignación está configurada para Mutacion_Primera_Clase.Cambio_Propietario pero se recibió Mutacion_Tercera_Clase.Incorporacion_Nueva")
     """
-    if tipo_datos != tipo_asignacion:
-        return False, f"La asignación está configurada para {tipo_asignacion} pero se recibió {tipo_datos}"
+    if tipo_datos_id != tipo_asignacion_id:
+        return False, f"La asignación está configurada para la mutación con ID {tipo_asignacion_id} pero se recibió el ID {tipo_datos_id}"
     
     return True, ""
 
@@ -118,17 +71,4 @@ def obtener_configuracion_mutacion(tipo_base):
     Returns:
         dict: Configuración del tipo de mutación o None si no existe
     """
-    return TIPOS_MUTACION_SOPORTADOS.get(tipo_base)
-
-
-def es_tipo_mutacion_soportado(tipo_base):
-    """
-    Verifica si un tipo de mutación está soportado.
-    
-    Args:
-        tipo_base (str): Tipo base de mutación como "Mutacion_Primera_Clase"
-        
-    Returns:
-        bool: True si está soportado, False en caso contrario
-    """
-    return tipo_base in TIPOS_MUTACION_SOPORTADOS 
+    return TIPOS_MUTACION_SOPORTADOS.get(tipo_base) 

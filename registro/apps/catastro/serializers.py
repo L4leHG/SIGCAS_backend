@@ -10,16 +10,11 @@ from registro.apps.catastro.models import (
     ColFuenteadministrativatipo,
     ColEstadodisponibilidadtipo,
     EnteEmisortipo,
-    ColDocumentotipo,
     CrAutoreconocimientoetnicotipo,
-    ColInteresadotipo,
     CrPrediotipo,
-    CrCondicionprediotipo,
     CrDestinacioneconomicatipo,
     CrEstadotipo,
     ColUnidadadministrativabasicatipo,
-    EstadoAsignacion,
-    CrMutaciontipo,
     ColRelacionsuperficietipo,
     CrConstruccionplantatipo,
     User,
@@ -39,8 +34,14 @@ from rest_framework.exceptions import ValidationError, APIException
 logger = logging.getLogger(__name__)
 
 class CaracteristicasUnidadconstruccionSerializer(serializers.ModelSerializer):
-    uso = serializers.SerializerMethodField()
-    tipo_unidad_construccion = serializers.SerializerMethodField()
+    uso = serializers.SlugRelatedField(
+        queryset=CrUsouconstipo.objects.all(),
+        slug_field='t_id'
+    )
+    tipo_unidad_construccion = serializers.SlugRelatedField(
+        queryset=CrUnidadconstrucciontipo.objects.all(),
+        slug_field='t_id'
+    )
 
     class Meta:
         model = CaracteristicasUnidadconstruccion
@@ -51,24 +52,14 @@ class CaracteristicasUnidadconstruccionSerializer(serializers.ModelSerializer):
             'avaluo_unidad', 'puntaje'
         ]
 
-    def get_uso(self, obj):
-        if obj.uso:
-            return obj.uso.ilicode
-        return None
-
-    def get_tipo_unidad_construccion(self, obj):
-        if obj.tipo_unidad_construccion:
-            return obj.tipo_unidad_construccion.ilicode
-        return None
-
 class UnidadesSerializer(serializers.ModelSerializer):
     tipo_unidad_construccion = serializers.SlugRelatedField(
         queryset=CrUnidadconstrucciontipo.objects.all(),
-        slug_field='ilicode'
+        slug_field='t_id'
     )
     uso = serializers.SlugRelatedField(
         queryset=CrUsouconstipo.objects.all(),
-        slug_field='ilicode'
+        slug_field='t_id'
     )
     class Meta:
         model = CaracteristicasUnidadconstruccion
@@ -123,10 +114,19 @@ class PredioUnidadespacialSerializer(serializers.ModelSerializer):
     
 
 class InteresadoSerializer(serializers.ModelSerializer):
-    tipo_documento = serializers.SerializerMethodField()
-    sexo = serializers.SerializerMethodField()
-    autoreconocimientoetnico = serializers.SerializerMethodField()
-    tipo_interesado = serializers.SerializerMethodField()
+    tipo_documento = serializers.SlugRelatedField(
+        queryset=ColDocumentotipo.objects.all(),
+        slug_field='t_id'
+    )
+    sexo = serializers.CharField(source='sexo.ilicode', read_only=True)
+    autoreconocimientoetnico = serializers.SlugRelatedField(
+        queryset=CrAutoreconocimientoetnicotipo.objects.all(),
+        slug_field='t_id'
+    )
+    tipo_interesado = serializers.SlugRelatedField(
+        queryset=ColInteresadotipo.objects.all(),
+        slug_field='t_id'
+    )
 
     class Meta:
         model = Interesado
@@ -137,25 +137,6 @@ class InteresadoSerializer(serializers.ModelSerializer):
             'razon_social', 'nombre', 'tipo_interesado', 'numero_documento'
         ]
 
-    def get_tipo_documento(self, obj):
-        if obj.tipo_documento:
-            return obj.tipo_documento.ilicode
-        return None
-
-    def get_sexo(self, obj):
-        if obj.sexo:
-            return obj.sexo.ilicode
-        return None
-
-    def get_autoreconocimientoetnico(self, obj):
-        if obj.autoreconocimientoetnico:
-            return obj.autoreconocimientoetnico.ilicode
-        return None
-
-    def get_tipo_interesado(self, obj):
-        if obj.tipo_interesado:
-            return obj.tipo_interesado.ilicode
-        return None
 
 class EstructuraAvaluoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -169,12 +150,23 @@ class PredioSerializer(serializers.ModelSerializer):
     terreno_geo = serializers.SerializerMethodField()
     unidades_construccion_geo = serializers.SerializerMethodField()
     terreno_alfa = serializers.SerializerMethodField()
-    # unidades_construccion_alfa = serializers.SerializerMethodField()
-    condicion_predio = serializers.SerializerMethodField()
-    destinacion_economica = serializers.SerializerMethodField()
-    estado = serializers.SerializerMethodField()
-    tipo = serializers.SerializerMethodField()
-    tipo_predio = serializers.SerializerMethodField()
+    condicion_predio = serializers.SlugRelatedField(
+        queryset=CrCondicionprediotipo.objects.all(),
+        slug_field='t_id'
+    )
+    destinacion_economica = serializers.SlugRelatedField(
+        queryset=CrDestinacioneconomicatipo.objects.all(),
+        slug_field='t_id'
+    )
+    estado = serializers.SlugRelatedField(
+        queryset=CrEstadotipo.objects.all(),
+        slug_field='t_id'
+    )
+    tipo = serializers.CharField(source='tipo.ilicode', read_only=True)
+    tipo_predio = serializers.SlugRelatedField(
+        queryset=CrPrediotipo.objects.all(),
+        slug_field='t_id'
+    )
     interesado = serializers.SerializerMethodField()
     avaluo = serializers.SerializerMethodField()
     area_catastral_terreno = serializers.SerializerMethodField()
@@ -313,13 +305,6 @@ class PredioSerializer(serializers.ModelSerializer):
             return UnidadConstruccionSerializer(instance_unidad, many=True).data
         return None
 
-    # def get_unidades_construccion_alfa(self, obj):
-    #     instance = PredioUnidadespacial.objects.filter(predio=obj, unidadconstruccion__isnull=False)
-    #     if instance.exists():
-    #         instance_unidad = [instance.unidadconstruccion.caracteristicas_unidadconstruccion.id for instance in instance if instance.unidadconstruccion ]
-    #         instance_unidades_construccion_alfa = CaracteristicasUnidadconstruccion.objects.filter(id__in=instance_unidad)
-    #         return CaracteristicasUnidadconstruccionAlfaSerializer(instance_unidades_construccion_alfa, many=True).data
-    #     return []
     def get_interesado(self, obj):
         instance = InteresadoPredio.objects.filter(predio=obj)
         if instance.exists():
@@ -327,30 +312,6 @@ class PredioSerializer(serializers.ModelSerializer):
             return InteresadoSerializer(instance_interesado, many=True).data
         return None
 
-    def get_condicion_predio(self, obj):
-        if obj.condicion_predio:
-            return obj.condicion_predio.ilicode
-        return None
-
-    def get_destinacion_economica(self, obj):
-        if obj.destinacion_economica:
-            return obj.destinacion_economica.ilicode
-        return None
-
-    def get_estado(self, obj):
-        if obj.estado:
-            return obj.estado.ilicode
-        return None
-
-    def get_tipo(self, obj):
-        if obj.tipo:
-            return obj.tipo.ilicode
-        return None
-
-    def get_tipo_predio(self, obj):
-        if obj.tipo_predio:
-            return obj.tipo_predio.ilicode
-        return None
 
 #### ******************************SERIALIZER PARA DOMINIOS
 
@@ -465,29 +426,19 @@ class UserSerializer(serializers.ModelSerializer):
 #### ******************************SERIALIZER PARA RADICACION 
 
 class RadicadoListSerializer(serializers.ModelSerializer):
-    tipo_interesado = serializers.SerializerMethodField()
-    tipo_documento = serializers.SerializerMethodField()
+    tipo_interesado = serializers.SlugRelatedField(
+        queryset=ColInteresadotipo.objects.all(),
+        slug_field='t_id'
+    )
+    tipo_documento = serializers.SlugRelatedField(
+        queryset=ColDocumentotipo.objects.all(),
+        slug_field='t_id'
+    )
     
     class Meta:
         model = Radicado
         fields = '__all__'
 
-
-    def get_tipo_interesado(self, obj):
-        if obj.tipo_interesado:
-            return obj.tipo_interesado.ilicode
-        return None
-    
-    def get_tipo_documento(self, obj):
-        if obj.tipo_documento:
-            return obj.tipo_documento.ilicode
-        return None
-
-
-class RadicadoListCreateSerializer(serializers.ListSerializer):
-    def create(self, validated_data):
-        radicados = [self.child.create(item) for item in validated_data]
-        return radicados
         
 class SerializerRadicado(serializers.Serializer):
     tipo_documento = serializers.IntegerField()
@@ -531,19 +482,20 @@ class SerializerRadicado(serializers.Serializer):
             raise ValidationError({"numero_radicado": "Ya existe un radicado con este número."})
 
         # Validaciones de consistencia entre tipo de interesado y tipo de documento
-        if tipo_interesado_instance.ilicode == "Persona_Natural":
-            if tipo_documento_instance.ilicode == "NIT":
+        # Asumiendo IDs: Persona_Natural=1, Persona_Juridica=2, NIT=3, Pasaporte=4
+        if tipo_interesado_instance.t_id == 6: # Persona_Natural
+            if tipo_documento_instance.t_id == 302: # NIT
                 raise ValidationError({
                     "tipo_documento": "Una Persona Natural no puede tener tipo de documento NIT."
                 })
             # Permitir letras y números para Pasaporte, solo dígitos para los demás
-            if tipo_documento_instance.ilicode != "Pasaporte" and not numero_documento.isdigit():
+            if tipo_documento_instance.t_id != 303 and not numero_documento.isdigit(): # Pasaporte
                 raise ValidationError({
                     "numero_documento": "Para Personas Naturales (excepto pasaporte), el documento solo debe contener números."
                 })
 
-        elif tipo_interesado_instance.ilicode == "Persona_Juridica":
-            if tipo_documento_instance.ilicode != "NIT":
+        elif tipo_interesado_instance.t_id == 7: # Persona_Juridica
+            if tipo_documento_instance.t_id != 302: # NIT
                 raise ValidationError({
                     "tipo_documento": "Una Persona Jurídica solo puede tener tipo de documento NIT."
                 })
@@ -594,8 +546,14 @@ class RadicadoPredioAsignadoSerializer(serializers.ModelSerializer):
     numero_radicado = serializers.SerializerMethodField()
     predio_id = serializers.SerializerMethodField()
     numero_predial_nacional = serializers.SerializerMethodField()
-    estado_asignacion = serializers.SerializerMethodField()
-    mutacion = serializers.SerializerMethodField()
+    estado_asignacion = serializers.SlugRelatedField(
+        queryset=EstadoAsignacion.objects.all(),
+        slug_field='t_id'
+    )
+    mutacion = serializers.SlugRelatedField(
+        queryset=CrMutaciontipo.objects.all(),
+        slug_field='t_id'
+    )
     usuario_analista = serializers.SerializerMethodField()
     usuario_coordinador = serializers.SerializerMethodField()
     tramite_catastral_id = serializers.SerializerMethodField()
@@ -619,12 +577,6 @@ class RadicadoPredioAsignadoSerializer(serializers.ModelSerializer):
     
     def get_numero_predial_nacional(self, obj):
         return obj.predio.numero_predial_nacional if obj.predio else None
-
-    def get_estado_asignacion(self, obj):
-        return obj.estado_asignacion.ilicode if obj.estado_asignacion else None
-
-    def get_mutacion(self, obj):
-        return obj.mutacion.ilicode if obj.mutacion else None
 
     def get_usuario_analista(self, obj):
         if obj.usuario_analista:
@@ -653,7 +605,7 @@ class RadicadoPredioAsignadoListCreateSerializer(serializers.ListSerializer):
 
 class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
     numero_radicado = serializers.CharField()
-    estado_asignacion = serializers.CharField(required=False, default="Pendiente")
+    estado_asignacion = serializers.IntegerField()
     usuario_analista = serializers.IntegerField(required=False, allow_null=True)
     usuario_coordinador = serializers.IntegerField(required=False, allow_null=True)
     mutacion = serializers.IntegerField()
@@ -680,10 +632,11 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
 
         # Validar estado de asignación
         try:
-            estado_asignacion_instance = EstadoAsignacion.objects.get(ilicode=data['estado_asignacion'])
+            estado_id = data['estado_asignacion']
+            estado_asignacion_instance = EstadoAsignacion.objects.get(t_id=estado_id)
             data['estado_asignacion_instance'] = estado_asignacion_instance
         except EstadoAsignacion.DoesNotExist:
-            raise ValidationError({'estado_asignacion': f"El estado de asignación '{data['estado_asignacion']}' no es válido."})
+            raise ValidationError({'estado_asignacion': f"El estado de asignación con ID '{estado_id}' no es válido."})
 
         # Validar usuarios por ID
         usuario_analista_id = data.get('usuario_analista')
@@ -826,16 +779,16 @@ class MutacionRadicadoValidationSerializer(serializers.Serializer):
                 )
 
         # Validar estado de asignación (opcional - puedes ajustar según tu lógica)
-        estados_permitidos = ['Pendiente']  # Ajusta según tus estados
-        if asignacion.estado_asignacion.ilicode not in estados_permitidos:
+        # Asumiendo que el t_id de 'Pendiente' es 1
+        estados_permitidos_ids = [1] 
+        if asignacion.estado_asignacion.t_id not in estados_permitidos_ids:
             raise serializers.ValidationError(
-                f"No se puede procesar la mutación. Estado actual: {asignacion.estado_asignacion.ilicode}"
             )
 
         # Agregar instancias al contexto para uso posterior
         attrs['asignacion_instance'] = asignacion
         attrs['radicado_instance'] = asignacion.radicado
-        attrs['mutacion_tipo'] = asignacion.mutacion.ilicode
+        attrs['mutacion_tipo'] = asignacion.mutacion.t_id
 
         return attrs
 
@@ -844,7 +797,7 @@ class ResolucionPredioDataSerializer(serializers.ModelSerializer):
     """Serializer para la información específica de un predio en la resolución."""
     avaluo = EstructuraAvaluoSerializer(many=True, source='estructuraavaluo_set')
     interesado = serializers.SerializerMethodField()
-    destinacion_economica = serializers.CharField(source='destinacion_economica.ilicode', read_only=True)
+    destinacion_economica = serializers.IntegerField(source='destinacion_economica.t_id', read_only=True)
     matricula_inmobiliaria = serializers.SerializerMethodField()
     
     class Meta:
