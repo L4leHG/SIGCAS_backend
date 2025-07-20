@@ -526,7 +526,9 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
             serializer = self.get_serializer(data=data, many=is_many)
             serializer.is_valid(raise_exception=True)
             
-            instances = self.perform_create(serializer)
+            with transaction.atomic():
+                instances = self.perform_create(serializer)
+
             # Serializar la respuesta
             response_serializer = RadicadoPredioAsignadoSerializer(instances, many=is_many)
             
@@ -541,21 +543,22 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
             logger.warning(f"Error de validación al crear asignación: {str(e)}")
             
             details = e.detail
+            error_message = "Error de validación desconocido."
 
-            # Si el error es una lista (caso de lote), tomamos el primer mensaje no vacío.
             if isinstance(details, list):
-                error_message = "Error de validación en el lote."
-                for error_item in details:
-                    if error_item:
-                        # Extraemos el mensaje de non_field_errors si existe
-                        if isinstance(error_item, dict) and 'non_field_errors' in error_item:
-                             error_message = error_item['non_field_errors'][0]
-                        else:
-                             error_message = str(error_item)
-                        break
-                return Response({"error": error_message}, status=status.HTTP_400_BAD_REQUEST)
+                first_error_item = next((item for item in details if item), None)
+                if isinstance(first_error_item, dict):
+                    if 'non_field_errors' in first_error_item:
+                        error_message = first_error_item['non_field_errors'][0]
+                    else:
+                        first_error_list = next(iter(first_error_item.values()), [])
+                        if first_error_list:
+                            error_message = first_error_list[0]
+                elif first_error_item:
+                    error_message = str(first_error_item)
+                
+                return Response({"error": str(error_message)}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Si el error es un diccionario (caso de objeto único)
             elif isinstance(details, dict):
                 if 'non_field_errors' in details:
                     return Response({"error": details['non_field_errors'][0]}, status=status.HTTP_400_BAD_REQUEST)
@@ -563,9 +566,10 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
                 simplified_errors = {}
                 for field, messages in details.items():
                     simplified_errors[field] = messages[0] if isinstance(messages, list) and messages else messages
-                return Response(simplified_errors, status=status.HTTP_400_BAD_REQUEST)
+                
+                first_error_message = next(iter(simplified_errors.values()), "Error de validación.")
+                return Response({"error": first_error_message}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Fallback para otros formatos de error
             return Response({"error": str(details)}, status=status.HTTP_400_BAD_REQUEST)
         except Radicado.DoesNotExist:
             return Response(
