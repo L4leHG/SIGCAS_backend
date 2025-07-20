@@ -72,3 +72,18 @@ def obtener_configuracion_mutacion(tipo_base):
         dict: Configuración del tipo de mutación o None si no existe
     """
     return TIPOS_MUTACION_SOPORTADOS.get(tipo_base) 
+
+def extraer_tipo_base_mutacion(mutacion_id):
+    """
+    Extrae el tipo base de mutación a partir del t_id.
+    Por ejemplo, si mutacion_id es 15, devuelve 'Mutacion_Primera_Clase'.
+    """
+    if mutacion_id == 15: # ID de Mutacion_Primera_Clase
+        return 15
+    elif mutacion_id == 16: # ID de Mutacion_Tercera_Clase
+        return 16
+    # Agrega más mapeos según sea necesario
+    # elif mutacion_id == ID_SEGUNDA:
+    #     return 'Mutacion_Segunda_Clase'
+    else:
+        raise ValueError(f"ID de mutación no reconocido: {mutacion_id}") 

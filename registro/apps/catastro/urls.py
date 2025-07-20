@@ -2,11 +2,11 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
      PredioDetalleAPIView, PredioPreView,
-    RadicadoView, RadicadoUpdateView, RadicadoListView,
+    RadicadoView, RadicadoUpdateView, RadicadoListView, RadicadoDeleteView,
     RadicadoPredioAsignadoCreateView, RadicadoPredioAsignadoUpdateView, UserListView,
     RadicadoPredioAsignadoListView, RadicadoPredioAsignadoDeleteView,
-    RadicadoDeleteView, RadicadoPredioAsignadoUpdateView, RadicadoPredioAsignadoListView,RadicadoPredioAsignadoCreateView,
-    ProcesarMutacionView, ConsultarEstadoMutacionView, VerificarTransaccionalidadView, ProcesarGeometriaView, FinalizarTramiteView, GenerarResolucionPDFView,
+    ProcesarMutacionView, VerificarTransaccionalidadView, FinalizarTramiteView, GenerarResolucionPDFView,
+    ProcesarGeometriaView,
  ######******DOMINIOS
     DominiosPredioView, DominiosInteresadoView, DominiosFuenteAdministrativaView, DominiosUnidadConstruccionView,
     UnidadAdministrativaBasicaTipoView, EstadoAsignacionView, MutacionTipoView,
@@ -41,15 +41,14 @@ urlpatterns = [
     ##Eliminar asignación de radicado a predio
     path('api/radicado/asignacion/<int:id>/eliminar/', RadicadoPredioAsignadoDeleteView.as_view(), name='eliminar_asignacion_radicado'),
     ##Detalle de un radicado
-    # path('api/radicado/detalle/<int:id>/', RadicadoDetailView.as_view(), name='detalle_radicado'), 
+    #path('api/radicado/detalle/<int:id>/', RadicadoDetailView.as_view(), name='detalle_radicado'), 
 
     ###############***********ENDPOINTS DE MUTACIONES
     ##Procesar mutación catastral
     path('api/mutacion/procesar/', ProcesarMutacionView.as_view(), name='procesar_mutacion'),
     ##procesar geometria desde archivo .zip
     path('api/mutacion/procesar-geometria/', ProcesarGeometriaView.as_view(), name='procesar_geometria'),
-    ##Consultar estado de mutación
-    path('api/mutacion/estado/<int:asignacion_id>/', ConsultarEstadoMutacionView.as_view(), name='consultar_estado_mutacion'),
+
     ##Verificar transaccionalidad (DEBUG)
     path('api/mutacion/verificar-transaccion/', VerificarTransaccionalidadView.as_view(), name='verificar_transaccionalidad'),
     ##Finalizar un tramite

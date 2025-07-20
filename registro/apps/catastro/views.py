@@ -283,40 +283,42 @@ class RadicadoView(generics.CreateAPIView):
     permission_classes = [IsConsultaAmindUser]
     authentication_classes = [CookieJWTAuthentication]
 
-    def get_serializer(self, *args, **kwargs):
-        if isinstance(kwargs.get('data', {}), list):
-            kwargs['many'] = True
-        return super().get_serializer(*args, **kwargs)
-
     def create(self, request, *args, **kwargs):
         try:
-            # Validar y crear el/los radicado(s)
+
+            # Validar y crear el radicado
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
-            instances = serializer.save()
-
-            # Determinar si se crearon uno o varios para la respuesta
-            is_many = isinstance(instances, list)
+            instance = self.perform_create(serializer)
             
             # Log de éxito
-            logger.info(f"Se crearon {len(instances) if is_many else 1} radicado(s) exitosamente.")
+            logger.info(f"Radicado creado exitosamente.")
             
             # Serializar la respuesta
-            response_serializer = RadicadoListSerializer(instances, many=is_many)
-            mensaje = "Se crearon los radicados exitosamente" if is_many else "Se creó el radicado exitosamente"
-            
+            response_serializer = RadicadoListSerializer(instance)
             return Response({
-                "mensaje": mensaje,
+                "mensaje": "Se creó el radicado exitosamente",
                 "data": response_serializer.data
             }, status=status.HTTP_201_CREATED)
             
         except ValidationError as e:
             # Log del error de validación
             logger.warning(f"Error de validación al crear radicado: {str(e)}")
-            return Response(
-                {"error": "Error de validación", "detalles": e.detail},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            if 'numero_radicado' in e.detail and any("Ya existe un radicado con este número" in str(msg) for msg in e.detail['numero_radicado']):
+                return Response(
+                    {"error": "Ya existe un radicado con este número."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Simplificar otros errores de validación
+            simplified_errors = {}
+            for field, messages in e.detail.items():
+                if isinstance(messages, list) and messages:
+                    simplified_errors[field] = messages[0]
+                else:
+                    simplified_errors[field] = messages
+            
+            return Response(simplified_errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             # Log del error inesperado
             logger.error(f"Error inesperado al crear radicado: {str(e)}", exc_info=True)
@@ -326,7 +328,11 @@ class RadicadoView(generics.CreateAPIView):
             )
 
     def perform_create(self, serializer):
-        return serializer.save()
+        try:
+            return serializer.save()
+        except Exception as e:
+            logger.error(f"Error al guardar el radicado: {str(e)}", exc_info=True)
+            raise
 
 class RadicadoUpdateView(generics.UpdateAPIView):
     queryset = Radicado.objects.all()
@@ -345,7 +351,6 @@ class RadicadoUpdateView(generics.UpdateAPIView):
 
     def update(self, request, *args, **kwargs):
         try:
-
             instance = self.get_object()
             serializer = self.get_serializer(instance, data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
@@ -359,10 +364,21 @@ class RadicadoUpdateView(generics.UpdateAPIView):
             })
             
         except ValidationError as e:
-            return Response(
-                {"error": "Error de validación", "detalles": e.detail},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            if 'numero_radicado' in e.detail and any("Ya existe un radicado con este número" in str(msg) for msg in e.detail['numero_radicado']):
+                return Response(
+                    {"error": "Ya existe un radicado con este número."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Simplificar otros errores de validación
+            simplified_errors = {}
+            for field, messages in e.detail.items():
+                if isinstance(messages, list) and messages:
+                    simplified_errors[field] = messages[0]
+                else:
+                    simplified_errors[field] = messages
+            
+            return Response(simplified_errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response(
                 {"error": "Ocurrió un error al procesar la solicitud"},
@@ -495,18 +511,23 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
     permission_classes = [IsConsultaAmindUser]
     authentication_classes = [CookieJWTAuthentication]
 
-    def get_serializer(self, *args, **kwargs):
-        if isinstance(kwargs.get('data', {}), list):
-            kwargs['many'] = True
-        return super().get_serializer(*args, **kwargs)
-
     def create(self, request, *args, **kwargs):
-        try:
-            serializer = self.get_serializer(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            instances = serializer.save()
+        is_many = isinstance(request.data, list)
+        data = request.data.copy()
 
-            is_many = isinstance(request.data, list)
+        if is_many:
+            for item in data:
+                item.setdefault('estado_asignacion', 1)
+        else:
+            data.setdefault('estado_asignacion', 1)
+
+        try:
+            # Validar y crear la(s) asignación(es)
+            serializer = self.get_serializer(data=data, many=is_many)
+            serializer.is_valid(raise_exception=True)
+            
+            instances = self.perform_create(serializer)
+            # Serializar la respuesta
             response_serializer = RadicadoPredioAsignadoSerializer(instances, many=is_many)
             
             mensaje = "Se crearon las asignaciones exitosamente" if is_many else "Se creó la asignación exitosamente"
@@ -517,9 +538,44 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
             }, status=status.HTTP_201_CREATED)
             
         except ValidationError as e:
+            logger.warning(f"Error de validación al crear asignación: {str(e)}")
+            
+            details = e.detail
+
+            # Si el error es una lista (caso de lote), tomamos el primer mensaje no vacío.
+            if isinstance(details, list):
+                error_message = "Error de validación en el lote."
+                for error_item in details:
+                    if error_item:
+                        # Extraemos el mensaje de non_field_errors si existe
+                        if isinstance(error_item, dict) and 'non_field_errors' in error_item:
+                             error_message = error_item['non_field_errors'][0]
+                        else:
+                             error_message = str(error_item)
+                        break
+                return Response({"error": error_message}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Si el error es un diccionario (caso de objeto único)
+            elif isinstance(details, dict):
+                if 'non_field_errors' in details:
+                    return Response({"error": details['non_field_errors'][0]}, status=status.HTTP_400_BAD_REQUEST)
+                
+                simplified_errors = {}
+                for field, messages in details.items():
+                    simplified_errors[field] = messages[0] if isinstance(messages, list) and messages else messages
+                return Response(simplified_errors, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Fallback para otros formatos de error
+            return Response({"error": str(details)}, status=status.HTTP_400_BAD_REQUEST)
+        except Radicado.DoesNotExist:
             return Response(
-                {"error": "Error de validación", "detalles": e.detail},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "El radicado especificado no existe"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Predio.DoesNotExist:
+            return Response(
+                {"error": "El predio especificado no existe"},
+                status=status.HTTP_404_NOT_FOUND
             )
         except Exception as e:
             logger.error(f"Error inesperado al crear asignación(es): {str(e)}", exc_info=True)
@@ -527,6 +583,9 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
                 {"error": "Ocurrió un error al procesar la solicitud"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    def perform_create(self, serializer):
+        return serializer.save()
 
 class RadicadoPredioAsignadoUpdateView(generics.UpdateAPIView):
     queryset = RadicadoPredioAsignado.objects.all()
@@ -557,7 +616,21 @@ class RadicadoPredioAsignadoUpdateView(generics.UpdateAPIView):
                 "data": response_serializer.data
             })
         except ValidationError as e:
-            return Response(e.detail, status=status.HTTP_404_NOT_FOUND)
+            if 'numero_radicado' in e.detail and any("Ya existe un radicado con este número" in str(msg) for msg in e.detail['numero_radicado']):
+                return Response(
+                    {"error": "Ya existe un radicado con este número."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Simplificar otros errores de validación
+            simplified_errors = {}
+            for field, messages in e.detail.items():
+                if isinstance(messages, list) and messages:
+                    simplified_errors[field] = messages[0]
+                else:
+                    simplified_errors[field] = messages
+            
+            return Response(simplified_errors, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.error(f"Error al actualizar asignación: {str(e)}")
             return Response(
@@ -729,7 +802,7 @@ class ProcesarMutacionView(APIView):
                     # ACTUALIZAR ESTADO DE LA ASIGNACIÓN A "REVISION"
                     # Esto también forma parte de la transacción atómica
                     try:
-                        estado_procesado = EstadoAsignacion.objects.get(t_id=4) # Asumiendo que 4 es 'Revision'
+                        estado_procesado = EstadoAsignacion.objects.get(ilicode='Revision')
                         asignacion.estado_asignacion = estado_procesado
                         asignacion.save()
                         logger.info(f"Estado de asignación {asignacion.id} actualizado a 'Revision'")
@@ -816,11 +889,14 @@ class ProcesarMutacionView(APIView):
             raise ValidationError(f'Tipo de mutación no soportado: {mutacion_tipo}')
         
         # PROCESAR SEGÚN TIPO DE MUTACIÓN
-        if mutacion_tipo == 15:  #  Mutacion_Primera_Clase
+        if mutacion_tipo == 'Mutacion_Primera_Clase':
             return self._procesar_mutacion_primera(mutacion_data, instance_resolucion)
         
-        elif mutacion_tipo == 16:  #  Mutacion_Tercera_Clase
+        elif mutacion_tipo == 'Mutacion_Tercera_Clase':
             return self._procesar_mutacion_tercera(mutacion_data, instance_resolucion)
+        
+        # elif mutacion_tipo == 'Mutacion_Segunda_Clase':
+        #     return self._procesar_mutacion_segunda(mutacion_data, instance_resolucion)
         
         else:
             # Esta línea no debería ejecutarse nunca debido a la validación anterior
@@ -841,7 +917,7 @@ class ProcesarMutacionView(APIView):
         )
         
         return {
-            'tipo': 1, # ID de Mutacion_Primera_Clase
+            'tipo': 'Mutacion_Primera_Clase',
             'descripcion': 'Cambio de propietario procesado exitosamente',
             'predios_procesados': len(mutacion_data.get('predios', [])),
             'resolucion': instance_resolucion.numero_resolucion
@@ -862,7 +938,7 @@ class ProcesarMutacionView(APIView):
         )
         
         return {
-            'tipo': 3, # ID de Mutacion_Tercera_Clase
+            'tipo': 'Mutacion_Tercera_Clase',
             'descripcion': 'Incorporación nueva procesada exitosamente',
             'predios_procesados': len(mutacion_data.get('predios', [])),
             'resolucion': instance_resolucion.numero_resolucion
@@ -880,95 +956,291 @@ class ProcesarMutacionView(APIView):
 
 class VerificarTransaccionalidadView(APIView):
     """
-    Vista de solo lectura para verificar si una mutación ya ha sido procesada
-    en un trámite catastral.
+    Vista de prueba para verificar que la transaccionalidad funciona correctamente.
+    Simula una operación que falla intencionalmente para verificar rollback.
     """
     permission_classes = [IsControlAnalistaUser]
     authentication_classes = [CookieJWTAuthentication]
-
-    def get(self, request, asignacion_id):
+    
+    def post(self, request):
+        """
+        Prueba de transaccionalidad:
+        1. Crea registros en múltiples tablas
+        2. Falla intencionalmente
+        3. Verifica que todos los registros se reviertan
+        """
         try:
-            # Validar que la asignación exista
-            asignacion = RadicadoPredioAsignado.objects.get(id=asignacion_id)
-            
-            # Verificar si existe un trámite asociado
-            transaccionalidad_activa = TramiteCatastral.objects.filter(
-                radicado_asignado=asignacion
-            ).exists()
+            with transaction.atomic():
+                logger.info("INICIANDO PRUEBA DE TRANSACCIONALIDAD")
+                
+                # Crear un TramiteCatastral de prueba
+                tramite_test = TramiteCatastral.objects.create(
+                    mutacion_id=1,  # Asumiendo que existe
+                    numero_resolucion=f"TEST-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                    fecha_resolucion=datetime.now().date(),
+                    fecha_inscripcion=datetime.now().date(),
+                    comienzo_vida_util_version=datetime.now().date(),
+                    radicado="TEST-RADICADO",
+                    radicado_asignado_id=1  # Asumiendo que existe
+                )
+                
+                logger.info(f"PRUEBA: TramiteCatastral creado ID: {tramite_test.id}")
+                
+                # Simular error intencional
+                if request.data.get('simular_error', True):
+                    logger.info("PRUEBA: Simulando error para probar rollback...")
+                    raise ValidationError("Error simulado para probar transaccionalidad")
+                
+                return Response({
+                    'mensaje': 'Prueba completada sin errores',
+                    'tramite_id': tramite_test.id
+                })
+                
+        except Exception as e:
+            logger.error(f"PRUEBA: Error capturado - {str(e)}")
+            logger.error("PRUEBA: La transacción debería revertirse automáticamente")
             
             return Response({
-                'asignacion_id': asignacion_id,
-                'transaccionalidad_activa': transaccionalidad_activa
-            })
+                'mensaje': 'Prueba de transaccionalidad ejecutada',
+                'error_simulado': str(e),
+                'info': 'Si la transaccionalidad funciona, no debería haber registros residuales en la BD'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ConsultarEstadoMutacionView(APIView):
+    """
+    Vista para consultar el estado de procesamiento de una mutación.
+    """
+    permission_classes = [IsControlAnalistaUser]
+    authentication_classes = [CookieJWTAuthentication]
+    
+    def get(self, request, asignacion_id):
+        """
+        Consulta el estado actual de una asignación/mutación.
+        
+        Args:
+            asignacion_id (int): ID de la asignación a consultar
+        """
+        try:
+            # Verificar que el usuario tenga acceso a esta asignación
+            asignacion = RadicadoPredioAsignado.objects.select_related(
+                'radicado', 'estado_asignacion', 'mutacion', 'predio', 'usuario_analista'
+            ).get(id=asignacion_id)
+            
+            # Verificar permisos (solo admin o analista asignado)
+            from registro.apps.users.models import Rol_predio
+            is_admin = Rol_predio.objects.filter(
+                user=request.user,
+                rol__name='Admin',
+                is_activate=True
+            ).exists()
+            
+            if not is_admin and asignacion.usuario_analista != request.user:
+                return Response({
+                    'error': 'Sin permisos',
+                    'detalle': 'No tienes permisos para consultar esta asignación'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Serializar datos
+            serializer = RadicadoPredioAsignadoSerializer(asignacion)
+            
+            # Buscar trámites procesados relacionados
+            tramites = TramiteCatastral.objects.filter(
+                radicado_asignado=asignacion
+            ).order_by('-id')
+            
+            tramites_data = []
+            for tramite in tramites:
+                tramites_data.append({
+                    'tramite_id': tramite.id,
+                    'numero_resolucion': tramite.numero_resolucion,
+                    'fecha_resolucion': tramite.fecha_resolucion,
+                    'mutacion': tramite.mutacion.ilicode if tramite.mutacion else None
+                })
+            
+            return Response({
+                'asignacion': serializer.data,
+                'tramites_procesados': tramites_data,
+                'total_tramites': len(tramites_data)
+            }, status=status.HTTP_200_OK)
             
         except RadicadoPredioAsignado.DoesNotExist:
             return Response({
-                'error': 'Asignación no encontrada'
+                'error': 'Asignación no encontrada',
+                'detalle': f'No existe una asignación con ID {asignacion_id}'
             }, status=status.HTTP_404_NOT_FOUND)
+            
+        except Exception as e:
+            logger.error(f"Error al consultar estado de mutación: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'Error interno del servidor',
+                'detalle': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+class ProcesarGeometriaView(APIView):
+    """
+    Endpoint para subir y validar un archivo ZIP con geometrías (Shapefile).
+    """
+    permission_classes = [IsControlAnalistaUser]
+    authentication_classes = [CookieJWTAuthentication]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        archivo_zip = request.FILES.get('file')
+        npn = request.data.get('npn')
+
+        if not archivo_zip:
+            return Response({"error": "No se proporcionó el archivo 'file'."}, status=status.HTTP_400_BAD_REQUEST)
+        if not npn:
+            return Response({"error": "No se proporcionó el 'npn' del predio."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            helper = IncorporacionUnidadesHelper()
+            features_dict = helper._procesar_geometria_zip(archivo_zip, npn)
+            
+            # Construir la respuesta final FeatureCollection
+            feature_collection = {
+                "type": "FeatureCollection",
+                "features": list(features_dict.values()) # Convertimos los valores del diccionario a una lista
+            }
+
+            return Response(feature_collection, status=status.HTTP_200_OK)
+
+        except ValidationError as ve:
+            return Response({'error': 'Error de validación de geometría', 'detalle': ve.detail}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error al procesar el archivo de geometría: {e}", exc_info=True)
+            return Response({"error": "Error interno al procesar el archivo.", "detalle": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class FinalizarTramiteView(APIView):
+    """
+    Endpoint para finalizar un trámite catastral.
+    Este proceso es el paso final después de que una mutación ha sido procesada y revisada.
+    
+    Acciones:
+    1. Cambia el estado de la asignación del radicado a 'Finalizado'.
+    2. Pasa el predio original (activo) a estado 'historico'.
+    3. Activa el predio o predios que estaban en estado 'novedad'.
+    Todo el proceso se ejecuta en una transacción atómica.
+    """
     permission_classes = [IsCoordinadorOrAdminUser]
     authentication_classes = [CookieJWTAuthentication]
 
-    @transaction.atomic
-    def post(self, request, tramite_id):
+    def post(self, request, tramite_id, *args, **kwargs):
         try:
-            tramite = TramiteCatastral.objects.get(id=tramite_id)
-            asignacion = tramite.radicado_asignado
+            with transaction.atomic():
+                # 1. Obtener el trámite y sus relaciones críticas
+                try:
+                    tramite = TramiteCatastral.objects.select_related(
+                        'radicado_asignado',
+                        'radicado_asignado__predio',
+                        'radicado_asignado__estado_asignacion'
+                    ).get(id=tramite_id)
+                except TramiteCatastral.DoesNotExist:
+                    return Response({'error': f'Trámite con ID {tramite_id} no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
-            # Validar que la asignación no esté ya finalizada
-            if asignacion.estado_asignacion.t_id == 3:  #  t_id de 'Finalizado'
-                return Response({
-                    'error': 'Trámite ya finalizado',
-                    'detalle': 'Esta asignación ya se encuentra en estado Finalizado.'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Actualizar todos los predios en novedad a estado 'Activo'
-            historial_predios_ids = Historial_predio.objects.filter(
-                predio_tramitecatastral__tramite_catastral=tramite,
-                predio__estado__t_id=106  # 106 es el t_id de 'Novedad'
-            ).values_list('predio_id', flat=True)
+                asignacion = tramite.radicado_asignado
+                predio_original = asignacion.predio
 
-            if historial_predios_ids:
-                estado_activo = CrEstadotipo.objects.get(t_id=105)  # Asumiendo que 105 es 'Activo'
-                Predio.objects.filter(id__in=historial_predios_ids).update(estado=estado_activo)
+                # 2. Validar que el trámite no esté ya finalizado
+                if asignacion.estado_asignacion.ilicode == 'Finalizado':
+                    return Response({'error': 'Este trámite ya ha sido finalizado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Actualizar el estado del predio original a 'Histórico'
-            predio_original = asignacion.predio
-            if predio_original:
-                estado_historico = CrEstadotipo.objects.get(t_id=107)  #  107 es 'Historico'
+                # 3. Identificar el(los) predio(s) de novedad asociados al trámite
+                # Se obtiene primero los IDs de los predios desde el historial, y se convierte a lista para evitar lazy evaluation
+                predios_novedad_ids = list(Historial_predio.objects.filter(
+                    predio_tramitecatastral__tramite_catastral=tramite,
+                    predio__estado__ilicode='Novedad'
+                ).values_list('predio__id', flat=True).distinct())
+
+                # Luego se obtienen los objetos Predio completos
+                predios_novedad = Predio.objects.filter(id__in=predios_novedad_ids)
+
+
+                # 4. Validar que existan predios de novedad para activar
+                if not predios_novedad.exists():
+                    return Response({'error': 'No se encontraron predios en estado "novedad" asociados a este trámite.'}, status=status.HTTP_400_BAD_REQUEST)
+
+                # 5. Obtener los objetos de estado necesarios
+                try:
+                    estado_activo = CrEstadotipo.objects.get(ilicode='Activo')
+                    estado_historico = CrEstadotipo.objects.get(ilicode='Historico')
+                    estado_finalizado = EstadoAsignacion.objects.get(ilicode='Finalizado')
+                except (CrEstadotipo.DoesNotExist, EstadoAsignacion.DoesNotExist) as e:
+                    logger.error(f"Error crítico de configuración: No se encontraron estados base: {e}")
+                    return Response({'error': 'Error de configuración del servidor: Faltan estados (activo, historico, Finalizado).'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+                # 6. Ejecutar las actualizaciones de estado
+                logger.info(f"Finalizando trámite {tramite_id}. Predio original: {predio_original.numero_predial_nacional}")
+                
+                current_datetime = datetime.now()
+
+                # Pasar predio original a histórico y actualizar fin de vida útil
                 predio_original.estado = estado_historico
+                predio_original.fin_vida_util_version = current_datetime
                 predio_original.save()
+                logger.info(f"Predio {predio_original.numero_predial_nacional} pasado a estado 'historico'. Fin de vida útil: {current_datetime}")
 
-            # Cambiar estado de la asignación a 'Finalizado'
-            estado_finalizado = EstadoAsignacion.objects.get(t_id=3)  #  Estado 'Finalizado'
-            asignacion.estado_asignacion = estado_finalizado
-            asignacion.save()
+                # Activar predios de novedad y actualizar comienzo de vida útil
+                npns_activados = list(predios_novedad.values_list('numero_predial_nacional', flat=True))
+                predios_novedad.update(estado=estado_activo, comienzo_vida_util_version=current_datetime)
+                logger.info(f"Activados {len(npns_activados)} predios: {npns_activados}. Comienzo de vida útil: {current_datetime}")
 
-            return Response({'mensaje': 'Trámite finalizado exitosamente'})
+                # Finalizar la asignación
+                asignacion.estado_asignacion = estado_finalizado
+                asignacion.save()
+                logger.info(f"Asignación {asignacion.id} pasada a estado 'Finalizado'.")
 
-        except TramiteCatastral.DoesNotExist:
-            return Response({'error': 'Trámite no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+                return Response({
+                    'mensaje': 'Trámite finalizado exitosamente.',
+                    'predio_historico': predio_original.id,
+                    'predio_activado': predios_novedad_ids
+                }, status=status.HTTP_200_OK)
+
         except Exception as e:
             logger.error(f"Error al finalizar el trámite {tramite_id}: {e}", exc_info=True)
-            return Response({'error': 'Error interno del servidor'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'error': 'Ocurrió un error inesperado durante la finalización del trámite.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class GenerarResolucionPDFView(APIView):
-    permission_classes = [IsAuthenticated]
+    """
+    Vista para generar un PDF de resolución para un trámite catastral específico.
+    """
+    permission_classes = [IsAuthenticated] # O el permiso que consideres adecuado
     authentication_classes = [CookieJWTAuthentication]
 
     def get(self, request, tramite_id):
         try:
+            # 1. Obtener el trámite catastral
             tramite = TramiteCatastral.objects.get(id=tramite_id)
-            serializer = ResolucionSerializer(tramite)
-            
-            # Aquí necesitarías una función para generar el PDF a partir de los datos serializados
-            # Esta parte depende de tu implementación específica de `weasyprint` u otra librería
-            # Ejemplo simplificado:
-            # pdf_file = generar_pdf_con_weasyprint(serializer.data)
-            # return HttpResponse(pdf_file, content_type='application/pdf')
-
-            return Response(serializer.data) # Devolver JSON por ahora
-        
         except TramiteCatastral.DoesNotExist:
-            return Response({'error': 'Trámite no encontrado'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {'error': f'No se encontró un trámite con el ID {tramite_id}.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 2. Serializar los datos usando el nuevo orquestador
+        serializer = ResolucionSerializer(tramite)
+        datos_resolucion = serializer.data
+
+        # 3. Renderizar el template HTML con los datos
+        html_string = render_to_string('catastro/resolucion_pdf.html', {'data': datos_resolucion})
+        
+        # 4. Generar el PDF usando WeasyPrint
+        try:
+            html = HTML(string=html_string)
+            pdf = html.write_pdf()
+
+            response = HttpResponse(pdf, content_type='application/pdf')
+            response['Content-Disposition'] = f'inline; filename="resolucion_{tramite.numero_resolucion}.pdf"'
+            
+            return response
+        except Exception as e:
+            logger.error(f"Error generando PDF de resolución para trámite {tramite_id}: {e}", exc_info=True)
+            return Response(
+                {'error': 'Ocurrió un error al generar el PDF.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

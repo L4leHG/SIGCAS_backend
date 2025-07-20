@@ -440,6 +440,12 @@ class RadicadoListSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
         
+class RadicadoListCreateSerializer(serializers.ListSerializer):
+    def create(self, validated_data):
+        radicados = [self.child.create(item) for item in validated_data]
+        return radicados
+
+
 class SerializerRadicado(serializers.Serializer):
     tipo_documento = serializers.IntegerField()
     tipo_interesado = serializers.IntegerField()
@@ -605,7 +611,7 @@ class RadicadoPredioAsignadoListCreateSerializer(serializers.ListSerializer):
 
 class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
     numero_radicado = serializers.CharField()
-    estado_asignacion = serializers.IntegerField()
+    estado_asignacion = serializers.IntegerField(required=False)
     usuario_analista = serializers.IntegerField(required=False, allow_null=True)
     usuario_coordinador = serializers.IntegerField(required=False, allow_null=True)
     mutacion = serializers.IntegerField()
@@ -623,53 +629,72 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
             return None
 
     def validate(self, data):
-        # Validar radicado
-        try:
-            radicado_instance = Radicado.objects.get(numero_radicado=data['numero_radicado'])
-            data['radicado_instance'] = radicado_instance
-        except Radicado.DoesNotExist:
-            raise ValidationError({'numero_radicado': f"El radicado '{data['numero_radicado']}' no existe."})
+        # Para actualizaciones (partial=True), solo validamos los campos que vienen en el request
+        is_update = self.instance is not None
 
-        # Validar estado de asignación
-        try:
-            estado_id = data['estado_asignacion']
-            estado_asignacion_instance = EstadoAsignacion.objects.get(t_id=estado_id)
-            data['estado_asignacion_instance'] = estado_asignacion_instance
-        except EstadoAsignacion.DoesNotExist:
-            raise ValidationError({'estado_asignacion': f"El estado de asignación con ID '{estado_id}' no es válido."})
+        # Validar radicado (solo si se proporciona en la creación o actualización)
+        if 'numero_radicado' in data:
+            try:
+                radicado_instance = Radicado.objects.get(numero_radicado=data['numero_radicado'])
+                data['radicado_instance'] = radicado_instance
+            except Radicado.DoesNotExist:
+                raise ValidationError({'numero_radicado': f"El radicado '{data['numero_radicado']}' no existe."})
 
-        # Validar usuarios por ID
-        usuario_analista_id = data.get('usuario_analista')
-        usuario_coordinador_id = data.get('usuario_coordinador')
-        
-        analista_instance = self._get_user_by_id(usuario_analista_id)
-        coordinador_instance = self._get_user_by_id(usuario_coordinador_id)
+        # Validar estado de asignación (solo si se proporciona)
+        if 'estado_asignacion' in data:
+            try:
+                estado_id = data['estado_asignacion']
+                estado_asignacion_instance = EstadoAsignacion.objects.get(t_id=estado_id)
+                data['estado_asignacion_instance'] = estado_asignacion_instance
+            except EstadoAsignacion.DoesNotExist:
+                raise ValidationError({'estado_asignacion': f"El estado de asignación con ID '{estado_id}' no es válido."})
 
-        if usuario_analista_id and not analista_instance:
-            raise ValidationError({'usuario_analista': f"El usuario analista con ID '{usuario_analista_id}' no existe."})
-        
-        if usuario_coordinador_id and not coordinador_instance:
-            raise ValidationError({'usuario_coordinador': f"El usuario coordinador con ID '{usuario_coordinador_id}' no existe."})
+        # Validar usuarios (solo si se proporcionan)
+        if 'usuario_analista' in data:
+            usuario_analista_id = data.get('usuario_analista')
+            analista_instance = self._get_user_by_id(usuario_analista_id)
+            if usuario_analista_id and not analista_instance:
+                raise ValidationError({'usuario_analista': f"El usuario analista con ID '{usuario_analista_id}' no existe."})
+            data['usuario_analista_instance'] = analista_instance
+            
+        if 'usuario_coordinador' in data:
+            usuario_coordinador_id = data.get('usuario_coordinador')
+            coordinador_instance = self._get_user_by_id(usuario_coordinador_id)
+            if usuario_coordinador_id and not coordinador_instance:
+                raise ValidationError({'usuario_coordinador': f"El usuario coordinador con ID '{usuario_coordinador_id}' no existe."})
+            data['usuario_coordinador_instance'] = coordinador_instance
 
-        data['usuario_analista_instance'] = analista_instance
-        data['usuario_coordinador_instance'] = coordinador_instance
+        # Validar mutación (solo si se proporciona)
+        if 'mutacion' in data:
+            try:
+                mutacion_id = data['mutacion']
+                mutacion_instance = CrMutaciontipo.objects.get(t_id=mutacion_id)
+                data['mutacion_instance'] = mutacion_instance
+            except CrMutaciontipo.DoesNotExist:
+                raise ValidationError({'mutacion': f"El tipo de mutación con ID '{mutacion_id}' no es válido."})
+            except KeyError:
+                if not is_update: # Es obligatorio en la creación
+                    raise ValidationError({'mutacion': 'El campo mutación es obligatorio.'})
 
-        # Validar mutación por ID
-        try:
-            mutacion_id = data['mutacion']
-            mutacion_instance = CrMutaciontipo.objects.get(t_id=mutacion_id)
-            data['mutacion_instance'] = mutacion_instance
-        except CrMutaciontipo.DoesNotExist:
-            raise ValidationError({'mutacion': f"El tipo de mutación con ID '{mutacion_id}' no es válido."})
-        except KeyError:
-            raise ValidationError({'mutacion': 'El campo mutación es obligatorio.'})
+        # Validar predio (solo si se proporciona)
+        if 'numero_predial_nacional' in data:
+            try:
+                predio_instance = Predio.objects.get(
+                    numero_predial_nacional=data['numero_predial_nacional'],
+                    estado__t_id=105
+                )
+                data['predio_instance'] = predio_instance
+            except Predio.DoesNotExist:
+                raise ValidationError({'numero_predial_nacional': f"No se encontró un predio 'Activo' con el NPN '{data['numero_predial_nacional']}'."})
+            except Predio.MultipleObjectsReturned:
+                raise ValidationError({'numero_predial_nacional': f"Error de integridad: Existe más de un predio 'Activo' con el NPN '{data['numero_predial_nacional']}'. Por favor, contacte al administrador."})
 
-        # Validar predio
-        try:
-            predio_instance = Predio.objects.get(numero_predial_nacional=data['numero_predial_nacional'])
-            data['predio_instance'] = predio_instance
-        except Predio.DoesNotExist:
-            raise ValidationError({'numero_predial_nacional': f"El predio '{data['numero_predial_nacional']}' no existe."})
+        # Si es una creación, ciertos campos son obligatorios
+        if not is_update:
+            required_fields_on_create = ['numero_radicado', 'mutacion', 'numero_predial_nacional']
+            for field in required_fields_on_create:
+                if field not in data:
+                    raise ValidationError({field: 'Este campo es requerido.'})
 
         return data
 
@@ -692,20 +717,14 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
         return asignacion
 
     def update(self, instance, validated_data):
-        # Actualizar estado de asignación
-        if 'estado_asignacion_instance' in validated_data:
-            instance.estado_asignacion = validated_data['estado_asignacion_instance']
-
-        # Actualizar usuarios
-        if 'usuario_analista' in validated_data:
-            instance.usuario_analista = validated_data.get('usuario_analista_instance')
-
-        if 'usuario_coordinador' in validated_data:
-            instance.usuario_coordinador = validated_data.get('usuario_coordinador_instance')
-
-        # Actualizar mutación
-        if 'mutacion_instance' in validated_data:
-            instance.mutacion = validated_data['mutacion_instance']
+        # Se actualizan los campos solo si se proporcionan en la solicitud.
+        # Si un campo no está en validated_data, se mantiene el valor existente.
+        instance.radicado = validated_data.get('radicado_instance', instance.radicado)
+        instance.predio = validated_data.get('predio_instance', instance.predio)
+        instance.estado_asignacion = validated_data.get('estado_asignacion_instance', instance.estado_asignacion)
+        instance.usuario_analista = validated_data.get('usuario_analista_instance', instance.usuario_analista)
+        instance.usuario_coordinador = validated_data.get('usuario_coordinador_instance', instance.usuario_coordinador)
+        instance.mutacion = validated_data.get('mutacion_instance', instance.mutacion)
 
         instance.save()
         return instance
