@@ -6,8 +6,9 @@ from registro.apps.catastro.models import (Predio, Interesado,
 InteresadoPredio, CrEstadotipo, FuenteAdministrativa,
 CrMutaciontipo, TramiteCatastral, PredioTramitecatastral,
 PredioFuenteadministrativa, EnteEmisortipo, ColEstadodisponibilidadtipo, ColFuenteadministrativatipo, ColDocumentotipo, ColInteresadotipo,
-CrSexotipo, Historial_predio, CrSexotipo, CrAutoreconocimientoetnicotipo
+CrSexotipo, Historial_predio, CrAutoreconocimientoetnicotipo
 ) 
+from registro.apps.catastro.serializers import InteresadoSerializer as InteresadoModelSerializer
 
 from rest_framework.serializers import ValidationError
 
@@ -235,19 +236,19 @@ class IncorporarInteresadoSerializer():
             
             #Validar ente emisor
             try:
-                instancia_ente_emisor = EnteEmisortipo.objects.get(ilicode = ente_emisor)
+                instancia_ente_emisor = EnteEmisortipo.objects.get(t_id = ente_emisor)
             except EnteEmisortipo.DoesNotExist:
                 raise ValidationError('El ente emisor no existe')
             
             #Validar estado disponibilidad
             try:
-                instancia_estado_disponibilidad = ColEstadodisponibilidadtipo.objects.get(ilicode = estado_disponibilidad)
+                instancia_estado_disponibilidad = ColEstadodisponibilidadtipo.objects.get(t_id = estado_disponibilidad)
             except ColEstadodisponibilidadtipo.DoesNotExist:
                 raise ValidationError('El estado de disponibilidad no existe')
             
             #Validar tipo
             try:
-                instancia_tipo = ColFuenteadministrativatipo.objects.get(ilicode = tipo)
+                instancia_tipo = ColFuenteadministrativatipo.objects.get(t_id = tipo)
             except ColFuenteadministrativatipo.DoesNotExist:
                 raise ValidationError('El tipo de fuente administrativa no existe')
             
@@ -398,45 +399,80 @@ class IncorporarInteresadoSerializer():
         return []
 
     def _crear_interesados(self, validate_data, instance_predio):
-        """Crea nuevos interesados y los asocia al predio."""
+        """
+        Crea nuevos interesados y los asocia al predio, utilizando el serializador
+        para validar y manejar las relaciones de dominio.
+        """
         interesados_predio_creados = []
         for interesado_data in validate_data:
+            # Asignar valor por defecto para 'autoreconocimientoetnico' si no se proporciona
+            if 'autoreconocimientoetnico' not in interesado_data or not interesado_data.get('autoreconocimientoetnico'):
+                interesado_data['autoreconocimientoetnico'] = 335 # ID para "No aplica"
+
+            # 1. Usar el serializer para validar y preparar los datos del interesado
+            serializer_interesado = InteresadoModelSerializer(data=interesado_data)
             try:
-                # Corregido: buscar dominios por t_id en lugar de ilicode
-                tipo_documento_id = interesado_data.get('tipo_documento')
-                sexo_id = interesado_data.get('sexo')
-                tipo_interesado_id = interesado_data.get('tipo_interesado')
-                etnia_id = interesado_data.get('etnia')
+                serializer_interesado.is_valid(raise_exception=True)
+                validated_interesado_data = serializer_interesado.validated_data
+                
+                # 2. Buscar o crear el interesado de forma atómica
+                # El serializer ya nos devuelve las instancias de los dominios
+                
+                # Separar los campos de búsqueda de los campos por defecto
+                search_fields = {
+                    'tipo_documento': validated_interesado_data.get('tipo_documento'),
+                    'numero_documento': validated_interesado_data.get('numero_documento'),
+                }
+                
+                defaults = {
+                    'primer_nombre': validated_interesado_data.get('primer_nombre'),
+                    'segundo_nombre': validated_interesado_data.get('segundo_nombre'),
+                    'primer_apellido': validated_interesado_data.get('primer_apellido'),
+                    'segundo_apellido': validated_interesado_data.get('segundo_apellido'),
+                    'razon_social': validated_interesado_data.get('razon_social'),
+                    'sexo': validated_interesado_data.get('sexo'),
+                    'tipo_interesado': validated_interesado_data.get('tipo_interesado'),
+                    'autoreconocimientoetnico': validated_interesado_data.get('autoreconocimientoetnico'),
+                }
 
-                instancia_documento = ColDocumentotipo.objects.get(t_id=tipo_documento_id)
-                instancia_sexo = SexoTipo.objects.get(t_id=sexo_id)
-                instancia_tipo_interesado = ColInteresadotipo.objects.get(t_id=tipo_interesado_id)
-                instancia_etnia = CrAutoreconocimientoetnicotipo.objects.get(t_id=etnia_id) if etnia_id else None
+                # Lógica para hacer la búsqueda más específica
+                tipo_interesado_obj = defaults.get('tipo_interesado')
+                if tipo_interesado_obj and tipo_interesado_obj.t_id == 6: # Persona Natural
+                    search_fields.update({
+                        'primer_nombre': defaults.get('primer_nombre'),
+                        'segundo_nombre': defaults.get('segundo_nombre'),
+                        'primer_apellido': defaults.get('primer_apellido'),
+                        'segundo_apellido': defaults.get('segundo_apellido'),
+                    })
+                elif tipo_interesado_obj: # Persona Jurídica u otro
+                    search_fields['razon_social'] = defaults.get('razon_social')
+                
+                # Limpiar el nombre completo para el campo 'nombre'
+                nombre_completo = f"{defaults.get('primer_nombre', '')} {defaults.get('segundo_nombre', '')} {defaults.get('primer_apellido', '')} {defaults.get('segundo_apellido', '')}".strip()
+                if not nombre_completo:
+                    nombre_completo = defaults.get('razon_social')
+                
+                defaults['nombre'] = nombre_completo
 
-            except (ColDocumentotipo.DoesNotExist, SexoTipo.DoesNotExist, ColInteresadotipo.DoesNotExist, CrAutoreconocimientoetnicotipo.DoesNotExist) as e:
-                raise ValidationError(f"Error en los datos del interesado: ID de dominio no válido. Detalles: {e}")
-
-            interesado_a_crear = {
-                'tipo_documento': instancia_documento.pk,
-                'numero_documento': interesado_data.get('numero_documento'),
-                'primer_nombre': interesado_data.get('primer_nombre'),
-                'segundo_nombre': interesado_data.get('segundo_nombre'),
-                'primer_apellido': interesado_data.get('primer_apellido'),
-                'segundo_apellido': interesado_data.get('segundo_apellido'),
-                'sexo': instancia_sexo.pk,
-                'razon_social': interesado_data.get('razon_social'),
-                'nombre': f"{interesado_data.get('primer_nombre', '')} {interesado_data.get('primer_apellido', '')}".strip(),
-                'tipo_interesado': instancia_tipo_interesado.pk,
-                'autoreconocimientoetnico': instancia_etnia.pk if instancia_etnia else None
-            }
-            
-            serializer_interesado = InteresadoSerializer(data=interesado_a_crear)
-            if serializer_interesado.is_valid(raise_exception=True):
-                interesado_predio = self.create_interesado(
-                    validate_data=interesado_data, 
-                    instancia_predio=instance_predio # Corregido: el nombre del parámetro es en español
+                instancia_interesado, created = Interesado.objects.get_or_create(
+                    **search_fields,
+                    defaults=defaults
                 )
-                interesados_predio_creados.append(interesado_predio)
+                
+                # 3. Crear la relación InteresadoPredio
+                relacion, created_relacion = InteresadoPredio.objects.get_or_create(
+                    interesado=instancia_interesado,
+                    predio=instance_predio
+                )
+                interesados_predio_creados.append(relacion)
+
+            except ValidationError as e:
+                # Re-lanzar el error de validación para que la transacción principal haga rollback
+                raise e
+            except Exception as e:
+                # Capturar otros posibles errores
+                raise ValidationError(f"Error inesperado al crear el interesado: {e}")
+                
         return interesados_predio_creados
 
     def _copiar_interesados(self, instance_predio, instance_predio_actual):

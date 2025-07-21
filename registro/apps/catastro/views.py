@@ -836,7 +836,18 @@ class ProcesarMutacionView(APIView):
                 
                 # Simplificar el mensaje de error si es una ValidationError
                 if isinstance(transaction_error, ValidationError):
-                    error_message = str(transaction_error.detail[0]) if hasattr(transaction_error, 'detail') and transaction_error.detail else str(transaction_error)
+                    details = transaction_error.detail
+                    error_message = "Error de validación."
+                    if isinstance(details, dict):
+                        # Tomar el primer error del diccionario
+                        first_key = next(iter(details))
+                        first_error_list = details[first_key]
+                        error_message = f"Error en el campo '{first_key}': {first_error_list[0]}"
+                    elif isinstance(details, list) and details:
+                        error_message = str(details[0])
+                    else:
+                        error_message = str(details)
+                    
                     return Response({'error': error_message}, status=status.HTTP_400_BAD_REQUEST)
                 
                 # Para otros errores, relanzar para que lo maneje el except general

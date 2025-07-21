@@ -140,11 +140,12 @@ class IncorporarMutacionPrimera(
             )
 
             # 3. CREAR REGISTRO EN HISTORIAL DEL PREDIO
-            self.create_historial_predio({
-                'predio': instance_predio,
-                'predio_tramitecatastral': instance_resolucion_predio,
-                'interesado_predio': interesados_predio_creados,
-                'predio_unidadespacial': unidades_espaciales_creadas
-            })
+            self.crear_registros_historial_predio(
+                instance_predio=instance_predio,
+                interesado_predio=interesados_predio_creados,
+                instance_unidadespacial=unidades_espaciales_creadas,
+                instance_resolucion_predio=instance_resolucion_predio,
+                es_mutacion_tercera=False
+            )
 
             # La llamada genérica get_terrenos_unidades_alfa_historica se reemplaza por las 3 llamadas explícitas de arriba.
