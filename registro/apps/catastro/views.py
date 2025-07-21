@@ -654,23 +654,13 @@ class RadicadoPredioAsignadoListView(generics.ListAPIView):
 
         if numero_radicado:
             queryset = queryset.filter(radicado__numero_radicado=numero_radicado)
-            if not queryset.exists():
-                raise ValidationError({
-                    "error": f"No se encontró ninguna asignación con el número de radicado {numero_radicado}"
-                })
         
         if id_asignacion:
-            queryset = queryset.filter(id= id_asignacion)
-            if not queryset.exists():
-                raise ValidationError({
-                    "No se encontró la asignacion"
-                })
+            queryset = queryset.filter(id=id_asignacion)
 
         return queryset
     
     def list(self, request, *args, **kwargs):
-        print(request.query_params.get('id_asignacion'),'identificador*')
-
         try:
             queryset = self.get_queryset()
             serializer = self.get_serializer(queryset, many=True)
