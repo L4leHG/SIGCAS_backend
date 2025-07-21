@@ -5,7 +5,26 @@ class IncorporacionHistorialPredioSerializer:
     Clase para manejar la incorporación de registros al historial de predios.
     """
 
-    def create_historial_predio(self, data_dict):
+    def crear_registros_historial_predio(self, instance_predio, interesado_predio, 
+                                        instance_unidadespacial, instance_resolucion_predio,
+                                        es_mutacion_tercera=False):
+        """
+        Crea los registros en la tabla Historial_predio, asociando el predio con sus
+        interesados y unidades espaciales (terrenos, unidades constructivas).
+        """
+        # Preparar los datos base para crear los registros históricos
+        data_resolucion_historica = {
+            'predio': instance_predio,
+            'interesado_predio': interesado_predio,
+            'predio_unidadespacial': instance_unidadespacial,
+            'predio_tramitecatastral': instance_resolucion_predio,
+            'es_mutacion_tercera': es_mutacion_tercera
+        }
+
+        # Llamar al método que crea los registros en la tabla Historial_predio
+        self.create_resolucion_historica(data_resolucion_historica)
+
+    def create_resolucion_historica(self, data_dict):
         """
         Crea registros históricos para predios basados en interesados y unidades espaciales.
         

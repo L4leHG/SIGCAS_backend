@@ -105,3 +105,72 @@ class IncorporacionGestionSerializer:
             return instance_resolucion_predio
         except Exception as e:
             raise ValidationError(f'Error al crear la relación predio-trámite: {str(e)}')
+
+    def create_fuenteadministrativa(self, data_fuente=None):
+        """
+        Crea una nueva fuente administrativa.
+        
+        Args:
+            data_fuente (dict): Datos para crear la fuente administrativa
+            
+        Returns:
+            ColFuenteadministrativa: Instancia creada
+            
+        Raises:
+            ValidationError: Si los datos no son válidos o los dominios no existen
+        """
+        if not data_fuente:
+            raise ValidationError('Los datos de la fuente administrativa son obligatorios.')
+        
+        # Lógica para crear la fuente administrativa
+        try:
+            # Corregido: buscar dominios por t_id en lugar de ilicode
+            tipo_id = data_fuente.get('tipo')
+            ente_emisor_id = data_fuente.get('ente_emisor')
+            estado_disponibilidad_id = data_fuente.get('estado_disponibilidad')
+            
+            instancia_tipo = ColFuenteadministrativatipo.objects.get(t_id=tipo_id)
+            instancia_ente_emisor = EnteEmisortipo.objects.get(t_id=ente_emisor_id)
+            instancia_estado_disponibilidad = ColEstadodisponibilidadtipo.objects.get(t_id=estado_disponibilidad_id)
+
+            data_to_create = {
+                'tipo': instancia_tipo.pk,
+                'ente_emisor': instancia_ente_emisor.pk,
+                'estado_disponibilidad': instancia_estado_disponibilidad.pk,
+                'oficina_origen': data_fuente.get('oficina_origen'),
+                'fecha_documento_fuente': data_fuente.get('fecha_documento_fuente'),
+                'numero_documento': data_fuente.get('numero_documento')
+            }
+            
+            serializer = FuenteAdministrativaSerializer(data=data_to_create)
+            if serializer.is_valid(raise_exception=True):
+                return serializer.save()
+                
+        except (ColFuenteadministrativatipo.DoesNotExist, EnteEmisortipo.DoesNotExist, ColEstadodisponibilidadtipo.DoesNotExist) as e:
+            raise ValidationError(f"Error en los datos de la fuente administrativa: ID de dominio no válido. Detalles: {e}")
+        except Exception as e:
+            raise ValidationError(f"Error al crear la fuente administrativa: {str(e)}")
+
+    def create_Predio_fuenteadministrativa(self, data):
+        """
+        Crea la relación entre un predio y una fuente administrativa.
+        
+        Args:
+            data (dict): Datos para crear la relación predio-fuente administrativa
+            
+        Returns:
+            PredioFuenteadministrativa: Instancia creada
+            
+        Raises:
+            ValidationError: Si los datos son inválidos
+        """
+        if not data:
+            raise ValidationError('Los datos del predio-fuente administrativa son obligatorios.')
+        
+        try:
+            instance_predio_fuente = PredioFuenteadministrativa(**data)
+            instance_predio_fuente.full_clean()  # Validar antes de guardar
+            instance_predio_fuente.save()
+            return instance_predio_fuente
+        except Exception as e:
+            raise ValidationError(f'Error al crear la relación predio-fuente administrativa: {str(e)}')

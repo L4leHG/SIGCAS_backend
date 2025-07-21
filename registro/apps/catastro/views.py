@@ -763,10 +763,14 @@ class ProcesarMutacionView(APIView):
             )
             
             if not serializer.is_valid():
-                return Response({
-                    'error': 'Datos de validación incorrectos',
-                    'detalle': serializer.errors
-                }, status=status.HTTP_400_BAD_REQUEST)
+                errors = serializer.errors
+                if 'non_field_errors' in errors and errors['non_field_errors']:
+                    error_message = errors['non_field_errors'][0]
+                else:
+                    # Extraer el primer mensaje de error de cualquier campo
+                    error_message = next((msg[0] for msg in errors.values() if msg), "Error de validación desconocido.")
+                
+                return Response({'error': error_message}, status=status.HTTP_400_BAD_REQUEST)
 
             # OBTENER DATOS VALIDADOS
             validated_data = serializer.validated_data
@@ -817,7 +821,7 @@ class ProcesarMutacionView(APIView):
 
                     logger.info(f"TRANSACCIÓN COMPLETADA exitosamente para mutación {mutacion_tipo_base}")
                     
-                    # SI LLEGAMOS AQUÍ, TODO FUE EXITOSO - LA TRANSACCIÓN SE COMMITEA AUTOMÁTICAMENTE
+                    # SI LLEGAMOS AQUÍ, TODO FUE EXITOSO - LA TRANSACCIÓN SE COMMITEA AUTOMÁTICamente
                     return Response({
                         'success': True,
                         'mensaje': f'Mutación {mutacion_tipo_base} procesada exitosamente',
@@ -829,37 +833,35 @@ class ProcesarMutacionView(APIView):
             except Exception as transaction_error:
                 logger.error(f"ERROR EN TRANSACCIÓN: {str(transaction_error)}")
                 logger.error("TRANSACCIÓN REVERTIDA: Todos los cambios han sido deshechos automáticamente")
-                # La transacción se revierte automáticamente al salir del bloque with
-                raise transaction_error  # Re-lanzar para que sea manejado por el except general
+                
+                # Simplificar el mensaje de error si es una ValidationError
+                if isinstance(transaction_error, ValidationError):
+                    error_message = str(transaction_error.detail[0]) if hasattr(transaction_error, 'detail') and transaction_error.detail else str(transaction_error)
+                    return Response({'error': error_message}, status=status.HTTP_400_BAD_REQUEST)
+                
+                # Para otros errores, relanzar para que lo maneje el except general
+                raise transaction_error
 
         except ValidationError as ve:
-            # Manejo específico para errores de avalúos
-            error_message = str(ve)
-            if 'no tiene avalúos registrados' in error_message:
-                return Response({
-                    'error': 'Datos faltantes en el predio',
-                    'detalle': str(ve),
-                    'solucion': 'Contacte al área técnica para registrar el avalúo base del predio antes de procesar la mutación.',
-                    'tipo_error': 'avaluos_faltantes'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            # Simplificar cualquier error de validación que no se haya capturado antes
+            raw_error_message = str(ve)
+            if 'no tiene avalúos registrados' in raw_error_message:
+                error_message = 'El predio no tiene avalúos registrados. Contacte al área técnica para registrar el avalúo base del predio antes de procesar la mutación.'
             else:
-                return Response({
-                    'error': 'Error de validación',
-                    'detalle': str(ve),
-                    'tipo_error': 'validacion'
-                }, status=status.HTTP_400_BAD_REQUEST)
+                details = ve.detail if hasattr(ve, 'detail') else raw_error_message
+                if isinstance(details, list) and details:
+                    error_message = str(details[0])
+                elif isinstance(details, dict) and details:
+                    first_error_list = next(iter(details.values()), [])
+                    error_message = str(first_error_list[0]) if first_error_list else "Error de validación."
+                else:
+                    error_message = str(details)
+            return Response({'error': error_message}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
             logger.error(f"Error al procesar mutación: {str(e)}", exc_info=True)
-            
-            # Logging adicional para problemas de transaccionalidad
-            logger.error("TRANSACCIÓN REVERTIDA: Todos los cambios han sido deshechos automáticamente")
-            
             return Response({
-                'error': 'Error interno del servidor',
-                'detalle': str(e),
-                'mensaje_tecnico': 'La transacción fue revertida automáticamente. No se guardaron cambios parciales.',
-                'trace': traceback.format_exc() if settings.DEBUG else None
+                'error': 'Ocurrió un error interno al procesar la mutación. Por favor, contacte al soporte técnico.'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def _procesar_mutacion(self, mutacion_tipo, mutacion_data, asignacion, radicado):
@@ -893,11 +895,11 @@ class ProcesarMutacionView(APIView):
             raise ValidationError(f'Tipo de mutación no soportado: {mutacion_tipo}')
         
         # PROCESAR SEGÚN TIPO DE MUTACIÓN
-        if mutacion_tipo == 'Mutacion_Primera_Clase':
-            return self._procesar_mutacion_primera(mutacion_data, instance_resolucion)
+        if mutacion_tipo == 15:  # Mutacion_Primera_Clase
+            return self._procesar_mutacion_primera(mutacion_data, instance_resolucion, asignacion)
         
-        elif mutacion_tipo == 'Mutacion_Tercera_Clase':
-            return self._procesar_mutacion_tercera(mutacion_data, instance_resolucion)
+        elif mutacion_tipo == 16:  # Mutacion_Tercera_Clase
+            return self._procesar_mutacion_tercera(mutacion_data, instance_resolucion, asignacion)
         
         # elif mutacion_tipo == 'Mutacion_Segunda_Clase':
         #     return self._procesar_mutacion_segunda(mutacion_data, instance_resolucion)
@@ -906,7 +908,7 @@ class ProcesarMutacionView(APIView):
             # Esta línea no debería ejecutarse nunca debido a la validación anterior
             raise ValidationError(f'Error interno: tipo de mutación {mutacion_tipo} marcado como soportado pero no implementado')
 
-    def _procesar_mutacion_primera(self, mutacion_data, instance_resolucion):
+    def _procesar_mutacion_primera(self, mutacion_data, instance_resolucion, asignacion):
         """
         Procesa mutación de primera clase - Cambio de Propietario.
         
@@ -917,17 +919,18 @@ class ProcesarMutacionView(APIView):
         incorporador = IncorporarMutacionPrimera()
         incorporador.incorporar_primera(
             mutacion=mutacion_data,
-            instance_resolucion=instance_resolucion
+            instance_resolucion=instance_resolucion,
+            asignacion=asignacion
         )
         
         return {
-            'tipo': 'Mutacion_Primera_Clase',
+            'tipo': 15, # ID de Mutacion_Primera_Clase
             'descripcion': 'Cambio de propietario procesado exitosamente',
             'predios_procesados': len(mutacion_data.get('predios', [])),
             'resolucion': instance_resolucion.numero_resolucion
         }
 
-    def _procesar_mutacion_tercera(self, mutacion_data, instance_resolucion):
+    def _procesar_mutacion_tercera(self, mutacion_data, instance_resolucion, asignacion):
         """
         Procesa mutación de tercera clase - Incorporación Nueva.
         
@@ -938,11 +941,12 @@ class ProcesarMutacionView(APIView):
         incorporador = IncorporarMutacionTercera()
         incorporador.incorporar_tercera(
             mutacion=mutacion_data,
-            instance_resolucion=instance_resolucion
+            instance_resolucion=instance_resolucion,
+            asignacion=asignacion
         )
         
         return {
-            'tipo': 'Mutacion_Tercera_Clase',
+            'tipo': 16, # ID de Mutacion_Tercera_Clase
             'descripcion': 'Incorporación nueva procesada exitosamente',
             'predios_procesados': len(mutacion_data.get('predios', [])),
             'resolucion': instance_resolucion.numero_resolucion
@@ -1093,16 +1097,13 @@ class ProcesarGeometriaView(APIView):
 
     def post(self, request):
         archivo_zip = request.FILES.get('file')
-        npn = request.data.get('npn')
 
         if not archivo_zip:
             return Response({"error": "No se proporcionó el archivo 'file'."}, status=status.HTTP_400_BAD_REQUEST)
-        if not npn:
-            return Response({"error": "No se proporcionó el 'npn' del predio."}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
             helper = IncorporacionUnidadesHelper()
-            features_dict = helper._procesar_geometria_zip(archivo_zip, npn)
+            features_dict = helper._procesar_geometria_zip(archivo_zip)
             
             # Construir la respuesta final FeatureCollection
             feature_collection = {

@@ -12,7 +12,7 @@ def es_tipo_mutacion_soportado(tipo_id):
     Returns:
         bool: True si está soportado, False en caso contrario.
     """
-    tipos_soportados = [1, 3]  # IDs para Primera y Tercera Clase
+    tipos_soportados = [15, 16]  # IDs para Primera y Tercera Clase
     return tipo_id in tipos_soportados
 
 def validar_coherencia_mutacion(tipo_asignacion_id, tipo_datos_id):

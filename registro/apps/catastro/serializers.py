@@ -53,7 +53,10 @@ class CaracteristicasUnidadconstruccionSerializer(serializers.ModelSerializer):
         ]
 
 class UnidadesSerializer(serializers.ModelSerializer):
-    tipo_unidad_construccion = serializers.SlugRelatedField(
+    # El campo en la API se llama 'unidadconstrucciontipo'
+    unidadconstrucciontipo = serializers.SlugRelatedField(
+        # Y se mapea al campo 'tipo_unidad_construccion' del modelo
+        source='tipo_unidad_construccion',
         queryset=CrUnidadconstrucciontipo.objects.all(),
         slug_field='t_id'
     )
@@ -71,7 +74,7 @@ class UnidadesSerializer(serializers.ModelSerializer):
             'area_construida',
             'estado_conservacion',
             'puntaje',
-            'tipo_unidad_construccion',
+            'unidadconstrucciontipo', # Usamos el nombre de la API
             'uso'
         ]
 
@@ -702,18 +705,22 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
         radicado_instance = validated_data['radicado_instance']
         predio_instance = validated_data['predio_instance']
 
-        # Verificar si ya existe una asignación para este radicado y predio
-        if RadicadoPredioAsignado.objects.filter(radicado=radicado_instance, predio=predio_instance).exists():
-            raise ValidationError(f"El predio {predio_instance.numero_predial_nacional} ya está asignado al radicado {radicado_instance.numero_radicado}.")
-
-        asignacion = RadicadoPredioAsignado.objects.create(
+        # Lógica de "actualizar o crear" (upsert)
+        asignacion, created = RadicadoPredioAsignado.objects.get_or_create(
             radicado=radicado_instance,
-            estado_asignacion=validated_data['estado_asignacion_instance'],
-            usuario_analista=validated_data['usuario_analista_instance'],
-            usuario_coordinador=validated_data['usuario_coordinador_instance'],
-            mutacion=validated_data['mutacion_instance'],
-            predio=predio_instance
+            predio=predio_instance,
+            defaults={
+                'estado_asignacion': validated_data.get('estado_asignacion_instance'),
+                'usuario_analista': validated_data.get('usuario_analista_instance'),
+                'usuario_coordinador': validated_data.get('usuario_coordinador_instance'),
+                'mutacion': validated_data.get('mutacion_instance')
+            }
         )
+        
+        if not created:
+            # Si la asignación ya existía, la actualizamos
+            return self.update(asignacion, validated_data)
+
         return asignacion
 
     def update(self, instance, validated_data):
@@ -759,10 +766,10 @@ class MutacionRadicadoValidationSerializer(serializers.Serializer):
     def validate_asignacion_id(self, value):
         """Valida que la asignación exista"""
         try:
-            asignacion = RadicadoPredioAsignado.objects.get(id=value)
+            RadicadoPredioAsignado.objects.get(id=value)
             return value
         except RadicadoPredioAsignado.DoesNotExist:
-            raise serializers.ValidationError(f"No existe una asignación con ID {value}")
+            raise serializers.ValidationError("La asignación no esta relacionada con este radicado.")
 
     def validate(self, attrs):
         """Validación cruzada entre radicado, asignación y usuario"""
@@ -801,7 +808,9 @@ class MutacionRadicadoValidationSerializer(serializers.Serializer):
         # Asumiendo que el t_id de 'Pendiente' es 1
         estados_permitidos_ids = [1] 
         if asignacion.estado_asignacion.t_id not in estados_permitidos_ids:
+            estado_actual = asignacion.estado_asignacion.ilicode
             raise serializers.ValidationError(
+                f"La asignación no puede ser procesada. Su estado actual es '{estado_actual}', pero debe estar en estado 'Pendiente'."
             )
 
         # Agregar instancias al contexto para uso posterior

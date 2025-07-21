@@ -33,7 +33,7 @@ class AvaluoSerializer(ModelSerializer):
 
 class PredioIncorporacionSerializer():
 
-    def create_predio_novedad_from_active(self, npn):
+    def create_predio_novedad_from_active(self, numero_predial_nacional):
         """
         Crea un nuevo predio en estado 'novedad' a partir del predio activo.
         - Valida que no exista previamente un predio en estado 'novedad'.
@@ -42,17 +42,17 @@ class PredioIncorporacionSerializer():
         """
         # Validar que no exista un predio en estado 'novedad'
         estado_novedad = CrEstadotipo.objects.get(t_id=106)
-        if Predio.objects.filter(numero_predial_nacional=npn, estado=estado_novedad).exists():
+        if Predio.objects.filter(numero_predial_nacional=numero_predial_nacional, estado=estado_novedad).exists():
             raise ValidationError(
-                f"Ya existe un predio con NPN {npn} en estado 'novedad'. "
+                f"Ya existe un predio con NPN {numero_predial_nacional} en estado 'novedad'. "
                 f"Debe ser eliminado o procesado antes de iniciar un nuevo trámite."
             )
 
         # Buscar el predio activo para copiarlo (estado activo = 105)
         try:
-            predio_activo = Predio.objects.get(numero_predial_nacional=npn, estado__t_id=105)
+            predio_activo = Predio.objects.get(numero_predial_nacional=numero_predial_nacional, estado__t_id=105)
         except Predio.DoesNotExist:
-            raise ValidationError(f'El número predial nacional {npn} no existe o no está activo.')
+            raise ValidationError(f'El número predial nacional {numero_predial_nacional} no existe o no está activo.')
 
         # Crear una copia REAL del objeto usando el método Django correcto
         # Usar copy.deepcopy para asegurar que sea una copia independiente
@@ -102,10 +102,23 @@ class PredioIncorporacionSerializer():
     # La función get_or_create_predio_novedad ha sido reemplazada por 
     # create_predio_novedad_from_active para cumplir con la nueva regla de negocio.
     
-    def get_instance_predio_and_actual(self, predio):
-        npn = predio.get('npn')
-        
-        predio_novedad, predio_activo = self.create_predio_novedad_from_active(npn)
+    def get_instance_predio_and_actual(self, predio_or_numero_predial):
+        """
+        Obtiene o crea el predio en novedad y retorna el predio activo.
+        Acepta tanto un diccionario de predio como un string NPN.
+        """
+        if isinstance(predio_or_numero_predial, str):
+            numero_predial_nacional = predio_or_numero_predial
+        elif isinstance(predio_or_numero_predial, dict):
+            # Acepta tanto 'npn' como 'numero_predial_nacional' para flexibilidad
+            numero_predial_nacional = predio_or_numero_predial.get('npn') or predio_or_numero_predial.get('numero_predial_nacional')
+        else:
+            raise ValidationError('Se esperaba un NPN (string) o un diccionario de predio.')
+
+        if not numero_predial_nacional:
+            raise ValidationError('No se proporcionó un Número Predial Nacional (NPN) válido.')
+
+        predio_novedad, predio_activo = self.create_predio_novedad_from_active(numero_predial_nacional)
         
         return predio_novedad, predio_activo
 
@@ -224,15 +237,15 @@ class PredioIncorporacionSerializer():
         elif instance_predio_actual:
             # Escenario 2: Copiar avalúo del predio actual
             try:
-                npn = instance_predio_actual.numero_predial_nacional
+                numero_predial_nacional = instance_predio_actual.numero_predial_nacional
                 
                 # DEBUG: Log para verificar qué predio se está buscando
-                print(f"DEBUG: Buscando avalúos para predio_actual ID: {instance_predio_actual.id}, NPN: {npn}")
+                print(f"DEBUG: Buscando avalúos para predio_actual ID: {instance_predio_actual.id}, NPN: {numero_predial_nacional}")
                 
                 # Buscar el avalúo del predio activo con la vigencia más alta
                 # Buscar SOLO en predios activos (estado 105) con el mismo NPN
                 avaluo_actual = EstructuraAvaluo.objects.filter(
-                    predio__numero_predial_nacional=npn,
+                    predio__numero_predial_nacional=numero_predial_nacional,
                     predio__estado__t_id=105  # Solo predios activos
                 ).order_by('-vigencia', '-fecha_avaluo').first()  # Prioridad por vigencia más alta
                 
@@ -250,27 +263,32 @@ class PredioIncorporacionSerializer():
                     self.create_avaluo(avaluo_data, instance_predio, instance_tramitecatastral_predio)
                 else:
                     # DEBUG: Información detallada sobre por qué no se encuentra
-                    print(f"DEBUG: No se encontró ningún avalúo para NPN: {npn}")
+                    print(f"DEBUG: No se encontró ningún avalúo para NPN: {numero_predial_nacional}")
                     print(f"DEBUG: instance_predio_actual ID: {instance_predio_actual.id}")
                     print(f"DEBUG: instance_predio_actual estado: {instance_predio_actual.estado.ilicode}")
                     
                     # Verificar si existen avalúos en general para este NPN
                     avaluos_por_npn = EstructuraAvaluo.objects.filter(
-                        predio__numero_predial_nacional=npn
+                        predio__numero_predial_nacional=numero_predial_nacional
                     ).select_related('predio')
                     
-                    print(f"DEBUG: Total avalúos en BD para NPN {npn}: {avaluos_por_npn.count()}")
+                    print(f"DEBUG: Total avalúos en BD para NPN {numero_predial_nacional}: {avaluos_por_npn.count()}")
                     for av in avaluos_por_npn:
                         print(f"DEBUG: Avalúo ID: {av.id}, Predio ID: {av.predio.id}, Estado: {av.predio.estado.ilicode}, Vigencia: {av.vigencia}")
                     
                     raise ValidationError(
-                        f'El predio {npn} no tiene avalúos registrados en el predio activo. '
+                        f'El predio {numero_predial_nacional} no tiene avalúos registrados en el predio activo. '
                         f'Contacte al área técnica para registrar el avalúo base.'
                     )
                     
             except Exception as e:
-                npn = instance_predio_actual.numero_predial_nacional if instance_predio_actual else 'N/A'
-                raise ValidationError(f'Error procesando avalúos del predio {npn}: {str(e)}')
+                # Si el error ya es una ValidationError, se relanza para no anidar mensajes.
+                if isinstance(e, ValidationError):
+                    raise e
+                
+                # Para otros errores, se envuelve en un mensaje contextualizado.
+                numero_predial_nacional = instance_predio_actual.numero_predial_nacional if instance_predio_actual else 'N/A'
+                raise ValidationError(f'Error procesando avalúos del predio {numero_predial_nacional}: {str(e)}')
         
         # Si no hay avalúos nuevos ni predio actual, no hacer nada
         # (esto es válido en algunos casos de incorporación)

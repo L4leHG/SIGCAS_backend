@@ -74,7 +74,7 @@ class IncorporarMutacionPrimera(
         # Si no se encuentra ninguna fecha, retornar None
         return None
 
-    def incorporar_primera(self, mutacion=None, instance_resolucion=None):
+    def incorporar_primera(self, mutacion=None, instance_resolucion=None, asignacion=None):
         """
         Procesa la mutación de primera clase - Cambio de Propietario.
         
@@ -88,10 +88,11 @@ class IncorporarMutacionPrimera(
         self.get_resolucion(mutacion, instance_resolucion, 15)
 
         for predio in mutacion['predios']:
-            npn = predio.get('npn')
+            # El NPN de origen se toma de la asignación para asegurar consistencia
+            npn = asignacion.predio.numero_predial_nacional if asignacion and asignacion.predio else predio.get('npn')
             
             # OBTENER INSTANCIAS DEL PREDIO
-            instance_predio, instance_predio_actual = self.get_instance_predio_and_actual(predio)
+            instance_predio, instance_predio_actual = self.get_instance_predio_and_actual(npn)
             
             # ADICIONAR LA INSTANCIA EN RESOLUCION PREDIO
             self.data_resolucion_predio['predio'] = instance_predio

@@ -61,25 +61,6 @@ class BaseSerializer():
         self.data_resolucion_predio['tramite_catastral'] = instance_resolucion
         self.data_resolucion_predio['radicado_asignado'] = instance_resolucion.radicado_asignado
 
-    def crear_registros_historial_predio(self, instance_predio, interesado_predio, 
-                                        instance_unidadespacial, instance_resolucion_predio,
-                                        es_mutacion_tercera=False):
-        """
-        Crea los registros en la tabla Historial_predio, asociando el predio con sus
-        interesados y unidades espaciales (terrenos, unidades constructivas).
-        """
-        # Preparar los datos base para crear los registros históricos
-        data_resolucion_historica = {
-            'predio': instance_predio,
-            'interesado_predio': interesado_predio,
-            'predio_unidadespacial': instance_unidadespacial,
-            'predio_tramitecatastral': instance_resolucion_predio,
-            'es_mutacion_tercera': es_mutacion_tercera
-        }
-
-        # Llamar al método que crea los registros en la tabla Historial_predio
-        self.create_resolucion_historica(data_resolucion_historica)
-        
     def get_terrenos_unidades_alfa_historica(self, 
             predio = None, 
             instance_predio = None, 
@@ -115,9 +96,7 @@ class BaseSerializer():
         instance_unidades = self.incorporar_unidades(
             predio,
             instance_predio_actual,
-            instance_predio_novedad,
-            validar_unidad,
-            archivo_geometria
+            instance_predio_novedad
         )
         
         #***********************************************************************************************************************************UNIDADESPACIAL

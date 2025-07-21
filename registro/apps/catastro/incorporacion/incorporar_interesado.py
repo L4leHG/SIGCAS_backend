@@ -6,7 +6,7 @@ from registro.apps.catastro.models import (Predio, Interesado,
 InteresadoPredio, CrEstadotipo, FuenteAdministrativa,
 CrMutaciontipo, TramiteCatastral, PredioTramitecatastral,
 PredioFuenteadministrativa, EnteEmisortipo, ColEstadodisponibilidadtipo, ColFuenteadministrativatipo, ColDocumentotipo, ColInteresadotipo,
-CrSexotipo, Historial_predio
+CrSexotipo, Historial_predio, CrSexotipo, CrAutoreconocimientoetnicotipo
 ) 
 
 from rest_framework.serializers import ValidationError
@@ -401,11 +401,42 @@ class IncorporarInteresadoSerializer():
         """Crea nuevos interesados y los asocia al predio."""
         interesados_predio_creados = []
         for interesado_data in validate_data:
-            interesado_predio = self.create_interesado(
-                validate_data=interesado_data, 
-                instancia_predio=instance_predio # Corregido: el nombre del parámetro es en español
-            )
-            interesados_predio_creados.append(interesado_predio)
+            try:
+                # Corregido: buscar dominios por t_id en lugar de ilicode
+                tipo_documento_id = interesado_data.get('tipo_documento')
+                sexo_id = interesado_data.get('sexo')
+                tipo_interesado_id = interesado_data.get('tipo_interesado')
+                etnia_id = interesado_data.get('etnia')
+
+                instancia_documento = ColDocumentotipo.objects.get(t_id=tipo_documento_id)
+                instancia_sexo = SexoTipo.objects.get(t_id=sexo_id)
+                instancia_tipo_interesado = ColInteresadotipo.objects.get(t_id=tipo_interesado_id)
+                instancia_etnia = CrAutoreconocimientoetnicotipo.objects.get(t_id=etnia_id) if etnia_id else None
+
+            except (ColDocumentotipo.DoesNotExist, SexoTipo.DoesNotExist, ColInteresadotipo.DoesNotExist, CrAutoreconocimientoetnicotipo.DoesNotExist) as e:
+                raise ValidationError(f"Error en los datos del interesado: ID de dominio no válido. Detalles: {e}")
+
+            interesado_a_crear = {
+                'tipo_documento': instancia_documento.pk,
+                'numero_documento': interesado_data.get('numero_documento'),
+                'primer_nombre': interesado_data.get('primer_nombre'),
+                'segundo_nombre': interesado_data.get('segundo_nombre'),
+                'primer_apellido': interesado_data.get('primer_apellido'),
+                'segundo_apellido': interesado_data.get('segundo_apellido'),
+                'sexo': instancia_sexo.pk,
+                'razon_social': interesado_data.get('razon_social'),
+                'nombre': f"{interesado_data.get('primer_nombre', '')} {interesado_data.get('primer_apellido', '')}".strip(),
+                'tipo_interesado': instancia_tipo_interesado.pk,
+                'autoreconocimientoetnico': instancia_etnia.pk if instancia_etnia else None
+            }
+            
+            serializer_interesado = InteresadoSerializer(data=interesado_a_crear)
+            if serializer_interesado.is_valid(raise_exception=True):
+                interesado_predio = self.create_interesado(
+                    validate_data=interesado_data, 
+                    instancia_predio=instance_predio # Corregido: el nombre del parámetro es en español
+                )
+                interesados_predio_creados.append(interesado_predio)
         return interesados_predio_creados
 
     def _copiar_interesados(self, instance_predio, instance_predio_actual):

@@ -25,7 +25,7 @@ class IncorporarMutacionTercera(
         IncorporacionHistorialPredioSerializer,
     ):
 
-    def incorporar_tercera(self, mutacion=None, instance_resolucion=None):
+    def incorporar_tercera(self, mutacion=None, instance_resolucion=None, asignacion=None):
         """
         Procesa la mutación de tercera clase - Modificación de Predio Existente.
         
@@ -44,14 +44,19 @@ class IncorporarMutacionTercera(
         self.get_resolucion(mutacion, instance_resolucion, 16)
 
         for predio in mutacion['predios']:
-            npn = predio.get('npn')
+            # El NPN de origen se toma de la asignación para asegurar consistencia
+            numero_predial_nacional = asignacion.predio.numero_predial_nacional if asignacion and asignacion.predio else predio.get('numero_predial_nacional')
             
+            # >>> AÑADIR EL NPN AL DICCIONARIO DEL PREDIO <<<
+            # Se asegura que el NPN del proceso esté disponible en las funciones subsecuentes.
+            predio['npn'] = numero_predial_nacional
+
             # OBTENER INSTANCIAS DEL PREDIO
-            instance_predio, instance_predio_actual = self.get_instance_predio_and_actual(predio)
+            instance_predio, instance_predio_actual = self.get_instance_predio_and_actual(numero_predial_nacional)
             
             # VALIDAR QUE EL PREDIO EXISTE (NO SE PERMITE INCORPORACION NUEVA)
             if instance_predio_actual is None:
-                raise ValidationError(f'El predio {npn} no existe. La mutación de tercera solo permite modificar predios existentes.')
+                raise ValidationError(f'El predio {numero_predial_nacional} no existe. La mutación de tercera solo permite modificar predios existentes.')
             
             # MODIFICAR DESTINO ECONÓMICO SI SE PROPORCIONA
             if predio.get('destinacion_economica'):
