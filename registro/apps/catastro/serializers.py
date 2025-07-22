@@ -19,7 +19,8 @@ from registro.apps.catastro.models import (
     CrConstruccionplantatipo,
     User,
     TramiteCatastral,
-    Historial_predio
+    Historial_predio, 
+    CrSexotipo
 )
 from registro.apps.users.models import Rol_predio
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
@@ -361,6 +362,11 @@ class CrAutoreconocimientoetnicotipoSerializer(serializers.ModelSerializer):
 class ColInteresadotipoSerializer(serializers.ModelSerializer):
     class Meta:
         model = ColInteresadotipo
+        fields = '__all__'
+
+class CrSexotipoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CrSexotipo
         fields = '__all__'
 
 class CrPrediotipoSerializer(serializers.ModelSerializer):

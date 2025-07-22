@@ -26,7 +26,7 @@ from registro.apps.catastro.models import (
     #GRUPO PREDIO
     CrPrediotipo, CrCondicionprediotipo, CrDestinacioneconomicatipo, CrEstadotipo,
     # INTERESADO
-    ColDocumentotipo, CrAutoreconocimientoetnicotipo, ColInteresadotipo,
+    ColDocumentotipo, CrAutoreconocimientoetnicotipo, ColInteresadotipo,CrSexotipo,
     # GRUPO FUENTE ADMINISTRATIVA
     ColFuenteadministrativatipo, ColEstadodisponibilidadtipo, EnteEmisortipo,
     # GRUPO UNIDAD CONSTRUCCIÓN
@@ -46,7 +46,7 @@ from .serializers import (
     ColUnidadadministrativabasicatipoSerializer,
     EstadoAsignacionSerializer, CrMutaciontipoSerializer, RadicadoListSerializer,
     RadicadoPredioAsignadoEditSerializer, UserSerializer, RadicadoPredioAsignadoSerializer,
-    ResolucionSerializer
+    ResolucionSerializer, CrSexotipoSerializer
 )
 
 from registro.apps.catastro.models import RadicadoPredioAsignado
@@ -185,6 +185,7 @@ class DominiosInteresadoView(APIView):
             "documento_tipo": ColDocumentotipoSerializer(ColDocumentotipo.objects.all(), many=True).data,
             "etnia": CrAutoreconocimientoetnicotipoSerializer(CrAutoreconocimientoetnicotipo.objects.all(), many=True).data,
             "tipo_interesado": ColInteresadotipoSerializer(ColInteresadotipo.objects.all(), many=True).data,
+            "sexo_tipo": CrSexotipoSerializer(CrSexotipo.objects.all(), many=True).data,
         })
 
 
