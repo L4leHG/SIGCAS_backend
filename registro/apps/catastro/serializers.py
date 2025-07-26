@@ -569,6 +569,7 @@ class RadicadoPredioAsignadoSerializer(serializers.ModelSerializer):
         queryset=CrMutaciontipo.objects.all(),
         slug_field='t_id'
     )
+    mutacion_nombre = serializers.SerializerMethodField()
     usuario_analista = serializers.SerializerMethodField()
     usuario_coordinador = serializers.SerializerMethodField()
     tramite_catastral_id = serializers.SerializerMethodField()
@@ -577,10 +578,12 @@ class RadicadoPredioAsignadoSerializer(serializers.ModelSerializer):
         model = RadicadoPredioAsignado
         fields = [
             'id', 'radicado_id', 'numero_radicado', 'predio_id', 'numero_predial_nacional',
-            'estado_asignacion', 'mutacion', 'usuario_analista',
+            'estado_asignacion', 'mutacion', 'mutacion_nombre', 'usuario_analista',
             'usuario_coordinador', 'tramite_catastral_id'
         ]
-    
+    def get_mutacion_nombre(self, obj):
+        return obj.mutacion.ilicode if obj.mutacion else None
+
     def get_radicado_id(self, obj):
         return obj.radicado.id if obj.radicado else None
 

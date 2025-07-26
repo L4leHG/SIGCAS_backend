@@ -644,23 +644,52 @@ class RadicadoPredioAsignadoUpdateView(generics.UpdateAPIView):
             )
 
 class RadicadoPredioAsignadoListView(generics.ListAPIView):
+    """
+    Lista las asignaciones de radicados a predios con filtrado por rol y búsqueda.
+
+    - Autenticación: Requiere que el usuario esté autenticado.
+    - Roles Privilegiados (IDs: 1, 3, 4): Ven todas las asignaciones.
+    - Otros Roles: Ven solo las asignaciones donde son el analista.
+    - Búsqueda: Permite filtrar por el inicio del 'numero_radicado'.
+    - Orden: Descendente por ID de asignación.
+    """
     serializer_class = RadicadoPredioAsignadoSerializer
-    permission_classes = [IsConsultaAmindUser]
     authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = RadicadoPredioAsignado.objects.all()
-        numero_radicado = self.request.query_params.get('numero_radicado')
-        id_asignacion = self.request.query_params.get('id_asignacion')
-
-        if numero_radicado:
-            queryset = queryset.filter(radicado__numero_radicado=numero_radicado)
+        user = self.request.user
         
-        if id_asignacion:
-            queryset = queryset.filter(id=id_asignacion)
+        # 5. Optimización y Rendimiento (N+1)
+        base_queryset = RadicadoPredioAsignado.objects.select_related(
+            'radicado', 'predio', 'estado_asignacion', 'mutacion',
+            'usuario_analista', 'usuario_coordinador'
+        ).prefetch_related(
+            'usuario_analista__rol_predio_set__rol',
+            'usuario_coordinador__rol_predio_set__rol'
+        )
 
-        return queryset
-    
+        # 3. Lógica de Filtrado por Roles
+        privileged_roles_ids = {1, 3, 4}
+        user_roles_ids = set(user.rol_predio_set.filter(is_activate=True).values_list('rol__id', flat=True))
+        
+        is_privileged = not user_roles_ids.isdisjoint(privileged_roles_ids)
+
+        if is_privileged:
+            # CASO A (Usuario Privilegiado): Acceso total
+            queryset = base_queryset
+        else:
+            # CASO B (Usuario No Privilegiado): Filtrar por analista
+            queryset = base_queryset.filter(usuario_analista=user)
+            
+        # 4. Funcionalidad de Búsqueda
+        numero_radicado = self.request.query_params.get('numero_radicado')
+        if numero_radicado:
+            queryset = queryset.filter(radicado__numero_radicado__startswith=numero_radicado)
+
+        # 6. Ordenamiento
+        return queryset.order_by('-id')
+
     def list(self, request, *args, **kwargs):
         try:
             queryset = self.get_queryset()
@@ -673,7 +702,7 @@ class RadicadoPredioAsignadoListView(generics.ListAPIView):
                 {"error": "Ocurrió un error al procesar la solicitud"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-        
+
 
 class RadicadoPredioAsignadoDeleteView(generics.DestroyAPIView):
     queryset = RadicadoPredioAsignado.objects.all()
