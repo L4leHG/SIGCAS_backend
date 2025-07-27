@@ -585,7 +585,7 @@ class RadicadoPredioAsignadoCreateView(generics.CreateAPIView):
         except Exception as e:
             logger.error(f"Error inesperado al crear asignación(es): {str(e)}", exc_info=True)
             return Response(
-                {"error": "Ocurrió un error al procesar la solicitud"},
+                {"error": f"Error inesperado: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -639,7 +639,7 @@ class RadicadoPredioAsignadoUpdateView(generics.UpdateAPIView):
         except Exception as e:
             logger.error(f"Error al actualizar asignación: {str(e)}")
             return Response(
-                {"error": "Ocurrió un error al procesar la solicitud"},
+                {"error": f"Error inesperado: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -770,11 +770,22 @@ class ProcesarMutacionView(APIView):
     """
     permission_classes = [IsControlAnalistaUser]
     authentication_classes = [CookieJWTAuthentication]
+    parser_classes = [JSONParser]  # Asegurar que la vista procese JSON
     
     def post(self, request):
         """
         Procesa una mutación catastral.
         """
+        # --- INICIO BLOQUE DE DEPURACIÓN ---
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"--- DEBUG: INICIO DE SOLICITUD A ProcesarMutacionView ---")
+        logger.debug(f"Cabeceras de la solicitud: {request.headers}")
+        logger.debug(f"Content-Type detectado por DRF: {request.content_type}")
+        logger.debug(f"Cuerpo de la solicitud (raw): {request.body}")
+        logger.debug(f"Datos de la solicitud (después de parsear): {request.data}")
+        logger.debug(f"--- DEBUG: FIN DE BLOQUE DE DEPURACIÓN ---")
+        
         try:
             # VALIDAR DATOS DE ENTRADA
             serializer = MutacionRadicadoValidationSerializer(
@@ -783,14 +794,13 @@ class ProcesarMutacionView(APIView):
             )
             
             if not serializer.is_valid():
-                errors = serializer.errors
-                if 'non_field_errors' in errors and errors['non_field_errors']:
-                    error_message = errors['non_field_errors'][0]
-                else:
-                    # Extraer el primer mensaje de error de cualquier campo
-                    error_message = next((msg[0] for msg in errors.values() if msg), "Error de validación desconocido.")
-                
-                return Response({'error': error_message}, status=status.HTTP_400_BAD_REQUEST)
+                # Formatear errores para que sean más claros
+                simplified_errors = {
+                    field: messages[0] for field, messages in serializer.errors.items()
+                }
+                return Response({
+                    'detalle': simplified_errors
+                }, status=status.HTTP_400_BAD_REQUEST)
 
             # OBTENER DATOS VALIDADOS
             validated_data = serializer.validated_data

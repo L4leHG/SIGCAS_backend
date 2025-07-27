@@ -175,6 +175,7 @@ class PredioSerializer(serializers.ModelSerializer):
     avaluo = serializers.SerializerMethodField()
     area_catastral_terreno = serializers.SerializerMethodField()
     orip_matricula = serializers.SerializerMethodField()
+    asignacion_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Predio
@@ -185,8 +186,15 @@ class PredioSerializer(serializers.ModelSerializer):
             'area_catastral_terreno', 'vigencia_actualizacion_catastral',
             'estado', 'tipo', 'direccion', 'tipo_predio',
             'terreno_geo', 'terreno_alfa', 'unidades_construccion_geo', 'interesado',
-            'avaluo'
+            'avaluo', 'asignacion_id'
         ]
+    
+    def get_asignacion_id(self, obj):
+        """
+        Obtiene el ID de la asignación más reciente para este predio.
+        """
+        asignacion = RadicadoPredioAsignado.objects.filter(predio=obj).order_by('-id').first()
+        return asignacion.id if asignacion else None
 
     def generate_pdf(self, data, numero_predial):
         """
@@ -647,8 +655,15 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
         # Validar radicado (solo si se proporciona en la creación o actualización)
         if 'numero_radicado' in data:
             try:
-                radicado_instance = Radicado.objects.get(numero_radicado=data['numero_radicado'])
-                data['radicado_instance'] = radicado_instance
+                radicados = Radicado.objects.filter(numero_radicado=data['numero_radicado'])
+                radicado_count = radicados.count()
+
+                if radicado_count > 1:
+                    raise ValidationError({'numero_radicado': f"Error de integridad: Existe más de un radicado con el número '{data['numero_radicado']}'. Por favor, corrija los datos."})
+                elif radicado_count == 0:
+                    raise Radicado.DoesNotExist
+                
+                data['radicado_instance'] = radicados.first()
             except Radicado.DoesNotExist:
                 raise ValidationError({'numero_radicado': f"El radicado '{data['numero_radicado']}' no existe."})
 
@@ -691,15 +706,47 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
         # Validar predio (solo si se proporciona)
         if 'numero_predial_nacional' in data:
             try:
-                predio_instance = Predio.objects.get(
-                    numero_predial_nacional=data['numero_predial_nacional'],
-                    estado__t_id=105
-                )
-                data['predio_instance'] = predio_instance
+                predios = Predio.objects.filter(numero_predial_nacional=data['numero_predial_nacional'], estado__t_id=105)
+                predio_count = predios.count()
+
+                if predio_count > 1:
+                    raise ValidationError({'numero_predial_nacional': f"Error de integridad: Existe más de un predio 'Activo' con el NPN '{data['numero_predial_nacional']}'. Por favor, contacte al administrador."})
+                elif predio_count == 0:
+                    raise Predio.DoesNotExist
+                
+                data['predio_instance'] = predios.first()
             except Predio.DoesNotExist:
                 raise ValidationError({'numero_predial_nacional': f"No se encontró un predio 'Activo' con el NPN '{data['numero_predial_nacional']}'."})
-            except Predio.MultipleObjectsReturned:
-                raise ValidationError({'numero_predial_nacional': f"Error de integridad: Existe más de un predio 'Activo' con el NPN '{data['numero_predial_nacional']}'. Por favor, contacte al administrador."})
+
+
+        # Validar que el predio no tenga otra asignación sin finalizar EN UN RADICADO DIFERENTE
+        if 'predio_instance' in data:
+            predio_instance = data['predio_instance']
+            
+            # Buscamos si el predio objetivo tiene alguna asignación activa...
+            query_otras_asignaciones = RadicadoPredioAsignado.objects.filter(
+                predio=predio_instance
+            ).select_related('radicado', 'estado_asignacion').exclude(estado_asignacion__t_id=3)
+
+            # ...pero excluimos la asignación que estamos editando (identificada por el radicado actual).
+            if 'radicado_instance' in data:
+                query_otras_asignaciones = query_otras_asignaciones.exclude(radicado=data['radicado_instance'])
+
+            # Si estamos en el endpoint de UPDATE, también excluimos por PK por seguridad.
+            if self.instance:
+                query_otras_asignaciones = query_otras_asignaciones.exclude(pk=self.instance.pk)
+
+            # Si después de las exclusiones, aún queda algo, significa que el predio está ocupado por OTRO trámite.
+            if query_otras_asignaciones.exists():
+                asignacion_existente = query_otras_asignaciones.first()
+                raise ValidationError({
+                    'numero_predial_nacional': (
+                        f"Este predio ya tiene una asignación pendiente de finalizar "
+                        f"en un radicado diferente (Radicado: {asignacion_existente.radicado.numero_radicado}, "
+                        f"Estado: {asignacion_existente.estado_asignacion.ilicode})."
+                    )
+                })
+
 
         # Si es una creación, ciertos campos son obligatorios
         if not is_update:

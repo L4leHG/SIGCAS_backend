@@ -36,18 +36,19 @@ class IsCoordinadorOrAdminUser(permissions.BasePermission):
 # ESTA CLASE HABILITA SOLO AL ROLE DE ADMINISTRADOR Y EL DE CONSULTA
 class IsControlAnalistaUser(permissions.BasePermission):
     """
-    Allows access only to admin and consult users.
+    Permiso personalizado para permitir el acceso solo a usuarios con el rol de Analista de Control.
     """
     def has_permission(self, request, view):
-        if request.user and request.user.is_active and request.user.is_verified:
-            instance_rol_predio = Rol_predio.objects.filter(
-                user=request.user, 
-                rol__name__in=('Admin','Analista'), 
-                is_activate = True
-            )
-            if instance_rol_predio.exists():
-                return True
-        return False
+        # Asegurarse de que el usuario esté autenticado
+        if not request.user or not request.user.is_authenticated:
+            return False
+        
+        # Verificar si el usuario tiene el rol 'Control-Analista' (ID 2) o 'Admin' (ID 4) activo
+        return Rol_predio.objects.filter(
+            user=request.user,
+            rol_id__in=[2, 4],  # IDs para 'Control-Analista' y 'Admin'
+            is_activate=True
+        ).exists()
 
 # ESTA CLASE HABILITA SOLO AL ROLE DE ADMINISTRADOR Y EL DE CONSULTA
 class IsAnalistaControlAmindUser(permissions.BasePermission):
