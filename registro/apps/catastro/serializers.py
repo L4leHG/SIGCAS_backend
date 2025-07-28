@@ -122,7 +122,12 @@ class InteresadoSerializer(serializers.ModelSerializer):
         queryset=ColDocumentotipo.objects.all(),
         slug_field='t_id'
     )
-    sexo = serializers.CharField(source='sexo.ilicode', read_only=True)
+    sexo = serializers.SlugRelatedField(
+        queryset=CrSexotipo.objects.all(),
+        slug_field='t_id',
+        allow_null=True,
+        required=False
+    )
     autoreconocimientoetnico = serializers.SlugRelatedField(
         queryset=CrAutoreconocimientoetnicotipo.objects.all(),
         slug_field='t_id'
@@ -794,16 +799,12 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
 
 class MutacionRadicadoValidationSerializer(serializers.Serializer):
     """
-    Serializer para validar radicado y asignación antes de procesar mutaciones.
+    Serializer para validar una asignación antes de procesar mutaciones.
     Valida que:
-    - El radicado exista
     - La asignación exista
     - El usuario que hace la petición sea el analista asignado
     - El estado de asignación permita la operación
     """
-    radicado_id = serializers.IntegerField(
-        help_text="ID del radicado"
-    )
     asignacion_id = serializers.IntegerField(
         help_text="ID de la asignación del radicado al predio"
     )
@@ -811,39 +812,18 @@ class MutacionRadicadoValidationSerializer(serializers.Serializer):
         help_text="Datos de la mutación a procesar"
     )
 
-    def validate_radicado_id(self, value):
-        """Valida que el radicado exista"""
-        try:
-            radicado = Radicado.objects.get(id=value)
-            return value
-        except Radicado.DoesNotExist:
-            raise serializers.ValidationError(f"No existe un radicado con ID {value}")
-
-    def validate_asignacion_id(self, value):
-        """Valida que la asignación exista"""
-        try:
-            RadicadoPredioAsignado.objects.get(id=value)
-            return value
-        except RadicadoPredioAsignado.DoesNotExist:
-            raise serializers.ValidationError("La asignación no esta relacionada con este radicado.")
-
     def validate(self, attrs):
-        """Validación cruzada entre radicado, asignación y usuario"""
-        radicado_id = attrs.get('radicado_id')
+        """Validación cruzada de la asignación y el usuario"""
         asignacion_id = attrs.get('asignacion_id')
         
-        # Obtener la asignación
+        # Obtener la asignación y sus relaciones
         try:
             asignacion = RadicadoPredioAsignado.objects.select_related(
                 'radicado', 'estado_asignacion', 'mutacion', 'predio', 'usuario_analista'
             ).get(id=asignacion_id)
         except RadicadoPredioAsignado.DoesNotExist:
-            raise serializers.ValidationError("La asignación especificada no existe")
-
-        # Validar que la asignación corresponde al radicado
-        if asignacion.radicado.id != radicado_id:
             raise serializers.ValidationError(
-                f"La asignación {asignacion_id} no corresponde al radicado {radicado_id}"
+                {'asignacion_id': f"No existe una asignación con ID {asignacion_id}"}
             )
 
         # Validar que el usuario actual sea el analista asignado
@@ -860,16 +840,14 @@ class MutacionRadicadoValidationSerializer(serializers.Serializer):
                     "Solo el analista asignado puede procesar la mutación."
                 )
 
-        # Validar estado de asignación (opcional - puedes ajustar según tu lógica)
-        # Asumiendo que el t_id de 'Pendiente' es 1
-        estados_permitidos_ids = [1] 
-        if asignacion.estado_asignacion.t_id not in estados_permitidos_ids:
+        # Validar estado de asignación (solo 'Pendiente' con t_id=1 puede ser procesado)
+        if asignacion.estado_asignacion.t_id != 1:
             estado_actual = asignacion.estado_asignacion.ilicode
             raise serializers.ValidationError(
                 f"La asignación no puede ser procesada. Su estado actual es '{estado_actual}', pero debe estar en estado 'Pendiente'."
             )
 
-        # Agregar instancias al contexto para uso posterior
+        # Agregar instancias al contexto para uso posterior en la vista
         attrs['asignacion_instance'] = asignacion
         attrs['radicado_instance'] = asignacion.radicado
         attrs['mutacion_tipo'] = asignacion.mutacion.t_id
