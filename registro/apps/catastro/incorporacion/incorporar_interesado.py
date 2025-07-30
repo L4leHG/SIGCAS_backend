@@ -326,9 +326,9 @@ class IncorporarInteresadoSerializer():
             if self.validar_caracteres_especiales_cedula(numero_documento_interesado):
                 raise ValidationError(f"No se permiten el caracteres especiales")
 
-        instancia_sexo = CrSexotipo.objects.get(ilicode=interesado.get('sexo'))
-        instancia_tipo_documento = ColDocumentotipo.objects.get(ilicode=interesado.get('tipo_documento'))
-        instancia_interesado_tipo = ColInteresadotipo.objects.get(ilicode=interesado.get('tipo_interesado'))
+        instancia_sexo = CrSexotipo.objects.get(t_id=interesado.get('sexo'))
+        instancia_tipo_documento = ColDocumentotipo.objects.get(t_id=interesado.get('tipo_documento'))
+        instancia_interesado_tipo = ColInteresadotipo.objects.get(t_id=interesado.get('tipo_interesado'))
 
         # Definimos los campos para la búsqueda y para la creación
         search_fields = {

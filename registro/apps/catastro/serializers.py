@@ -20,7 +20,8 @@ from registro.apps.catastro.models import (
     User,
     TramiteCatastral,
     Historial_predio, 
-    CrSexotipo
+    CrSexotipo,
+    FuenteAdministrativa
 )
 from registro.apps.users.models import Rol_predio
 from rest_framework_gis.serializers import GeoFeatureModelSerializer
@@ -33,6 +34,24 @@ from datetime import datetime
 from rest_framework.exceptions import ValidationError, APIException
 
 logger = logging.getLogger(__name__)
+
+class FuenteAdministrativaSerializer(serializers.ModelSerializer):
+    ente_emisor = serializers.SlugRelatedField(
+        queryset=EnteEmisortipo.objects.all(),
+        slug_field='t_id'
+    )
+    estado_disponibilidad = serializers.SlugRelatedField(
+        queryset=ColEstadodisponibilidadtipo.objects.all(),
+        slug_field='t_id'
+    )
+    tipo = serializers.SlugRelatedField(
+        queryset=ColDocumentotipo.objects.all(),
+        slug_field='t_id'
+    )
+
+    class Meta:
+        model = FuenteAdministrativa
+        fields = ['oficina_origen', 'ciudad_origen', 'fecha_documento_fuente', 'numero_documento', 'ente_emisor', 'estado_disponibilidad', 'tipo']
 
 class CaracteristicasUnidadconstruccionSerializer(serializers.ModelSerializer):
     uso = serializers.SlugRelatedField(
@@ -181,6 +200,7 @@ class PredioSerializer(serializers.ModelSerializer):
     area_catastral_terreno = serializers.SerializerMethodField()
     orip_matricula = serializers.SerializerMethodField()
     asignacion_id = serializers.SerializerMethodField()
+    fuente_administrativa = serializers.SerializerMethodField()
 
     class Meta:
         model = Predio
@@ -190,10 +210,18 @@ class PredioSerializer(serializers.ModelSerializer):
             'condicion_predio', 'destinacion_economica',
             'area_catastral_terreno', 'vigencia_actualizacion_catastral',
             'estado', 'tipo', 'direccion', 'tipo_predio',
-            'terreno_geo', 'terreno_alfa', 'unidades_construccion_geo', 'interesado',
+            'terreno_geo', 'terreno_alfa', 'unidades_construccion_geo', 'interesado', 'fuente_administrativa',
             'avaluo', 'asignacion_id'
         ]
     
+    def get_fuente_administrativa(self, obj):
+        # La relación parece ser a través de un modelo intermedio.
+        # Filtramos directamente sobre FuenteAdministrativa usando la relación inversa.
+        instance = FuenteAdministrativa.objects.filter(prediofuenteadministrativa__predio=obj).order_by('-id').first()
+        if instance:
+            return FuenteAdministrativaSerializer(instance).data
+        return None
+        
     def get_asignacion_id(self, obj):
         """
         Obtiene el ID de la asignación más reciente para este predio.
@@ -826,19 +854,26 @@ class MutacionRadicadoValidationSerializer(serializers.Serializer):
                 {'asignacion_id': f"No existe una asignación con ID {asignacion_id}"}
             )
 
-        # Validar que el usuario actual sea el analista asignado
+        # Validar que el usuario actual sea el analista asignado o un admin
         request = self.context.get('request')
         if request and request.user:
-            if not asignacion.usuario_analista:
-                raise serializers.ValidationError(
-                    "Esta asignación no tiene un analista asignado"
-                )
-            
-            if asignacion.usuario_analista.id != request.user.id:
-                raise serializers.ValidationError(
-                    "No tienes permisos para procesar esta asignación. "
-                    "Solo el analista asignado puede procesar la mutación."
-                )
+            # Comprobar si el usuario tiene el rol de 'admin'.
+            # Se asume un sistema de roles donde request.user.rol_predio_set contiene los roles.
+            user_roles = [rp.rol.name.lower() for rp in request.user.rol_predio_set.all() if rp.rol]
+            is_admin = 'admin' in user_roles
+
+            # Si el usuario no es un admin, debe ser el analista asignado.
+            if not is_admin:
+                if not asignacion.usuario_analista:
+                    raise serializers.ValidationError(
+                        "Esta asignación no tiene un analista asignado"
+                    )
+                
+                if asignacion.usuario_analista.id != request.user.id:
+                    raise serializers.ValidationError(
+                        "No tienes permisos para procesar esta asignación. "
+                        "Solo el analista asignado puede procesar la mutación."
+                    )
 
         # Validar estado de asignación (solo 'Pendiente' con t_id=1 puede ser procesado)
         if asignacion.estado_asignacion.t_id != 1:

@@ -5,7 +5,7 @@ from .views import (
     RadicadoView, RadicadoUpdateView, RadicadoListView, RadicadoDeleteView,
     RadicadoPredioAsignadoCreateView, RadicadoPredioAsignadoUpdateView, UserListView,
     RadicadoPredioAsignadoListView, RadicadoPredioAsignadoDeleteView,
-    ProcesarMutacionView, VerificarTransaccionalidadView, FinalizarTramiteView, GenerarResolucionPDFView,
+    ProcesarMutacionView, VerificarTransaccionalidadView, FinalizarTramiteView, EnviarARevisionView, ActualizarMutacionView, GenerarResolucionPDFView,
     ProcesarGeometriaView,
  ######******DOMINIOS
     DominiosPredioView, DominiosInteresadoView, DominiosFuenteAdministrativaView, DominiosUnidadConstruccionView,
@@ -53,6 +53,10 @@ urlpatterns = [
     path('api/mutacion/verificar-transaccion/', VerificarTransaccionalidadView.as_view(), name='verificar_transaccionalidad'),
     ##Finalizar un tramite
     path('api/tramites/<int:tramite_id>/finalizar/', FinalizarTramiteView.as_view(), name='finalizar_tramite'),
+    ##Enviar a revisión un tramite
+    path('api/tramites/<int:tramite_id>/enviar_a_revision/', EnviarARevisionView.as_view(), name='enviar_a_revision'),
+    ##Actualizar una mutación en proceso
+    path('api/mutacion/actualizar/', ActualizarMutacionView.as_view(), name='actualizar_tramite'),
     ##Generar PDF de la resolución
     path('api/tramite/<int:tramite_id>/resolucion-pdf/', GenerarResolucionPDFView.as_view(), name='resolucion_pdf'),
 
