@@ -52,9 +52,9 @@ urlpatterns = [
     ##Verificar transaccionalidad (DEBUG)
     path('api/mutacion/verificar-transaccion/', VerificarTransaccionalidadView.as_view(), name='verificar_transaccionalidad'),
     ##Finalizar un tramite
-    path('api/tramites/<int:tramite_id>/finalizar/', FinalizarTramiteView.as_view(), name='finalizar_tramite'),
+    path('api/asignacion/<int:asignacion_id>/finalizar/', FinalizarTramiteView.as_view(), name='finalizar_tramite'),
     ##Enviar a revisión un tramite
-    path('api/tramites/<int:tramite_id>/enviar_a_revision/', EnviarARevisionView.as_view(), name='enviar_a_revision'),
+    path('api/asignacion/<int:asignacion_id>/enviar_a_revision/', EnviarARevisionView.as_view(), name='enviar_a_revision'),
     ##Actualizar una mutación en proceso
     path('api/mutacion/actualizar/', ActualizarMutacionView.as_view(), name='actualizar_tramite'),
     ##Generar PDF de la resolución

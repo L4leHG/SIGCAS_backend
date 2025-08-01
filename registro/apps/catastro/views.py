@@ -1178,7 +1178,7 @@ class FinalizarTramiteView(APIView):
     permission_classes = [IsCoordinadorOrAdminUser]
     authentication_classes = [CookieJWTAuthentication]
 
-    def post(self, request, tramite_id, *args, **kwargs):
+    def post(self, request, asignacion_id, *args, **kwargs):
         finalizar = request.data.get('finalizar')
         if finalizar is None:
             return Response({'error': 'El parámetro booleano "finalizar" es requerido en el cuerpo de la solicitud.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1187,17 +1187,21 @@ class FinalizarTramiteView(APIView):
 
         try:
             with transaction.atomic():
-                # 1. Obtener el trámite y sus relaciones críticas
+                # 1. Obtener la asignación y sus relaciones críticas
                 try:
-                    tramite = TramiteCatastral.objects.select_related(
-                        'radicado_asignado',
-                        'radicado_asignado__predio',
-                        'radicado_asignado__estado_asignacion'
-                    ).get(id=tramite_id)
-                except TramiteCatastral.DoesNotExist:
-                    return Response({'error': f'Trámite con ID {tramite_id} no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+                    asignacion = RadicadoPredioAsignado.objects.select_related(
+                        'predio',
+                        'estado_asignacion'
+                    ).get(id=asignacion_id)
+                except RadicadoPredioAsignado.DoesNotExist:
+                    return Response({'error': f'Asignación con ID {asignacion_id} no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
-                asignacion = tramite.radicado_asignado
+                # Obtener el trámite a través de la asignación
+                try:
+                    tramite = TramiteCatastral.objects.get(radicado_asignado=asignacion)
+                except TramiteCatastral.DoesNotExist:
+                    return Response({'error': f'No se encontró un trámite catastral asociado a la asignación {asignacion_id}.'}, status=status.HTTP_404_NOT_FOUND)
+
                 
                 # 2. Validar estados
                 if asignacion.estado_asignacion.ilicode == 'Finalizado':
@@ -1228,7 +1232,7 @@ class FinalizarTramiteView(APIView):
                         logger.error(f"Error crítico de configuración: No se encontraron estados base: {e}")
                         return Response({'error': 'Error de configuración del servidor: Faltan estados (Activo, Historico, Finalizado).'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-                    logger.info(f"Finalizando trámite {tramite_id}. Predio original: {predio_original.numero_predial_nacional}")
+                    logger.info(f"Finalizando trámite asociado a la asignación {asignacion_id}. Predio original: {predio_original.numero_predial_nacional}")
                     
                     current_datetime = datetime.now()
 
@@ -1269,7 +1273,7 @@ class FinalizarTramiteView(APIView):
                     }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            logger.error(f"Error al procesar la finalización del trámite {tramite_id}: {e}", exc_info=True)
+            logger.error(f"Error al procesar la finalización de la asignación {asignacion_id}: {e}", exc_info=True)
             return Response({'error': 'Ocurrió un error inesperado durante la finalización del trámite.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -1325,19 +1329,16 @@ class EnviarARevisionView(APIView):
     permission_classes = [IsControlAnalistaUser] # Permiso para analistas
     authentication_classes = [CookieJWTAuthentication]
 
-    def post(self, request, tramite_id, *args, **kwargs):
+    def post(self, request, asignacion_id, *args, **kwargs):
         try:
             with transaction.atomic():
-                # 1. Obtener el trámite y la asignación asociada
+                # 1. Obtener la asignación directamente
                 try:
-                    tramite = TramiteCatastral.objects.select_related(
-                        'radicado_asignado',
-                        'radicado_asignado__estado_asignacion'
-                    ).get(id=tramite_id)
-                except TramiteCatastral.DoesNotExist:
-                    return Response({'error': f'Trámite con ID {tramite_id} no encontrado.'}, status=status.HTTP_404_NOT_FOUND)
-
-                asignacion = tramite.radicado_asignado
+                    asignacion = RadicadoPredioAsignado.objects.select_related(
+                        'estado_asignacion', 'usuario_analista'
+                    ).get(id=asignacion_id)
+                except RadicadoPredioAsignado.DoesNotExist:
+                    return Response({'error': f'Asignación con ID {asignacion_id} no encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
                 # 2. Validar que el usuario sea el analista asignado
                 user_roles = [rp.rol.name.lower() for rp in request.user.rol_predio_set.all() if rp.rol]
@@ -1370,7 +1371,7 @@ class EnviarARevisionView(APIView):
                 }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            logger.error(f"Error al enviar a revisión el trámite {tramite_id}: {e}", exc_info=True)
+            logger.error(f"Error al enviar a revisión la asignación {asignacion_id}: {e}", exc_info=True)
             return Response({'error': 'Ocurrió un error inesperado al procesar la solicitud.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
