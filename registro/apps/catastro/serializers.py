@@ -201,6 +201,8 @@ class PredioSerializer(serializers.ModelSerializer):
     orip_matricula = serializers.SerializerMethodField()
     asignacion_id = serializers.SerializerMethodField()
     fuente_administrativa = serializers.SerializerMethodField()
+    departamento = serializers.SerializerMethodField()
+    municipio = serializers.SerializerMethodField()
 
     class Meta:
         model = Predio
@@ -213,6 +215,16 @@ class PredioSerializer(serializers.ModelSerializer):
             'terreno_geo', 'terreno_alfa', 'unidades_construccion_geo', 'interesado', 'fuente_administrativa',
             'avaluo', 'asignacion_id'
         ]
+    
+    def get_departamento(self, obj):
+        if obj.departamento == '76':
+            return 'Valle del Cauca'
+        return obj.departamento
+
+    def get_municipio(self, obj):
+        if obj.municipio == '400':
+            return 'La Union'
+        return obj.municipio
     
     def get_fuente_administrativa(self, obj):
         # La relación parece ser a través de un modelo intermedio.

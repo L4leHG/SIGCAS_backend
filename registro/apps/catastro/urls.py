@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-     PredioDetalleAPIView, PredioPreView,
+     PredioDetalleAPIView, PredioPreView, PredioDetalleTramiteAPIView,
     RadicadoView, RadicadoUpdateView, RadicadoListView, RadicadoDeleteView,
     RadicadoPredioAsignadoCreateView, RadicadoPredioAsignadoUpdateView, UserListView,
     RadicadoPredioAsignadoListView, RadicadoPredioAsignadoDeleteView,
@@ -19,6 +19,7 @@ urlpatterns = [
     path('detalle_predios/', PredioDetalleAPIView.as_view(), name='predio-lista-detalle'),
     ##Previzualización de la información del Predio
     path('preview_predios/', PredioPreView.as_view(), name='predio-preview'),
+    path('detalle_predios_tramite/', PredioDetalleTramiteAPIView.as_view(), name='predio-tramite-detalle'),
 
 
     ###############***********ENDPOINTS DE RADICADO

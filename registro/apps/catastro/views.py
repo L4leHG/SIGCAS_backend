@@ -971,7 +971,8 @@ class ProcesarMutacionView(APIView):
             'tipo': 15, # ID de Mutacion_Primera_Clase
             'descripcion': 'Cambio de propietario procesado exitosamente',
             'predios_procesados': len(mutacion_data.get('predios', [])),
-            'resolucion': instance_resolucion.numero_resolucion
+            'resolucion': instance_resolucion.numero_resolucion,
+            'tramite_id': instance_resolucion.id
         }
 
     def _procesar_mutacion_tercera(self, mutacion_data, instance_resolucion, asignacion):
@@ -993,7 +994,8 @@ class ProcesarMutacionView(APIView):
             'tipo': 16, # ID de Mutacion_Tercera_Clase
             'descripcion': 'Incorporación nueva procesada exitosamente',
             'predios_procesados': len(mutacion_data.get('predios', [])),
-            'resolucion': instance_resolucion.numero_resolucion
+            'resolucion': instance_resolucion.numero_resolucion,
+            'tramite_id': instance_resolucion.id
         }
 
     # def _procesar_mutacion_segunda(self, mutacion_data, instance_resolucion):
@@ -1500,3 +1502,86 @@ class ActualizarMutacionView(APIView):
             EstructuraAvaluo.objects.filter(predio=predio).delete()
             # incorporador.incorporar_avaluo(...)
             logger.info(f"Lógica de actualización de avalúos para predio {predio.id} debe ser implementada.")
+
+class PredioDetalleTramiteAPIView(APIView):
+    """
+    Vista para visualizar la información de un predio con una lógica de estado específica para trámites.
+    - Si el predio tiene una asignación en estado 'Pendiente', muestra el predio activo.
+    - Si la asignación está en 'Revision' o 'En proceso', muestra el/los predio(s) 'Novedad' asociados.
+    - En cualquier otro caso, o si no hay asignación, muestra el predio activo.
+    """
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        numero_predial = request.query_params.get('numero_predial_nacional')
+        if not numero_predial:
+            return Response(
+                {"error": "Debe proporcionar el parámetro 'numero_predial_nacional'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Siempre partimos del predio activo (estado__t_id=105)
+            predio_activo = Predio.objects.get(numero_predial_nacional=numero_predial, estado__t_id=105)
+        except Predio.DoesNotExist:
+            return Response(
+                {"error": f"No se encontró un predio 'Activo' con el número predial {numero_predial}."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Predio.MultipleObjectsReturned:
+             return Response(
+                {"error": f"Error de integridad: Existe más de un predio 'Activo' con el NPN {numero_predial}. Por favor, contacte al administrador."},
+                status=status.HTTP_409_CONFLICT
+            )
+
+        # Buscar la asignación más reciente para este predio que no esté finalizada
+        asignacion = RadicadoPredioAsignado.objects.filter(
+            predio=predio_activo
+        ).exclude(estado_asignacion__t_id=3).order_by('-id').first()
+
+
+        if not asignacion:
+            # Si no hay asignación, mostrar el predio activo
+            serializer = PredioSerializer(predio_activo)
+            return Response(serializer.data)
+
+        estado_asignacion_id = asignacion.estado_asignacion.t_id
+
+        # Estado 'Revision' (t_id=2) o 'En proceso' (t_id=4)
+        if estado_asignacion_id in [2, 4]:
+            try:
+                # Buscar el trámite asociado a la asignación
+                tramite = TramiteCatastral.objects.get(radicado_asignado=asignacion)
+                
+                # Buscar los predios 'Novedad' (estado__t_id=106) a través del historial
+                predios_novedad_ids = Historial_predio.objects.filter(
+                    predio_tramitecatastral__tramite_catastral=tramite
+                ).values_list('predio_id', flat=True).distinct()
+                
+                predios_novedad = Predio.objects.filter(
+                    id__in=predios_novedad_ids,
+                    estado__t_id=106
+                )
+
+                if predios_novedad.exists():
+                    # Si se encuentran predios novedad, se serializan y se devuelven
+                    serializer = PredioSerializer(predios_novedad, many=True)
+                    return Response(serializer.data)
+                else:
+                    # Caso de borde: el trámite está en revisión/en proceso pero no hay predios novedad.
+                    serializer = PredioSerializer(predio_activo)
+                    data = serializer.data
+                    data['advertencia'] = f"El trámite está en estado '{asignacion.estado_asignacion.ilicode}', pero no se encontraron predios 'Novedad' asociados. Mostrando predio activo."
+                    return Response(data, status=status.HTTP_200_OK)
+
+            except TramiteCatastral.DoesNotExist:
+                # No se ha iniciado el trámite formalmente, mostrar predio activo
+                serializer = PredioSerializer(predio_activo)
+                data = serializer.data
+                data['advertencia'] = f"La asignación está en estado '{asignacion.estado_asignacion.ilicode}', pero aún no se ha creado un trámite catastral. Mostrando predio activo."
+                return Response(data)
+
+        # Para 'Pendiente' (t_id=1) o cualquier otro estado, mostrar el predio activo
+        serializer = PredioSerializer(predio_activo)
+        return Response(serializer.data)
