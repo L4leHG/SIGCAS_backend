@@ -822,6 +822,11 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
             # Si la asignación ya existía, la actualizamos
             return self.update(asignacion, validated_data)
 
+        # Actualizar el campo asignado del radicado a True cuando se crea una asignación
+        if not radicado_instance.asignado:
+            radicado_instance.asignado = True
+            radicado_instance.save()
+
         return asignacion
 
     def update(self, instance, validated_data):
@@ -835,6 +840,13 @@ class RadicadoPredioAsignadoEditSerializer(serializers.Serializer):
         instance.mutacion = validated_data.get('mutacion_instance', instance.mutacion)
 
         instance.save()
+        
+        # Asegurar que el radicado esté marcado como asignado cuando se actualiza una asignación
+        radicado = instance.radicado
+        if not radicado.asignado:
+            radicado.asignado = True
+            radicado.save()
+        
         return instance
 
 class MutacionRadicadoValidationSerializer(serializers.Serializer):

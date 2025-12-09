@@ -20,8 +20,9 @@ import json
 
 from registro.apps.users.models import Rol_predio 
 from registro.apps.catastro.models import (
-    Predio, Radicado, TramiteCatastral,
-    ColDocumentotipo, ColInteresadotipo, InteresadoPredio, Terreno, Unidadconstruccion, EstructuraAvaluo,
+    Predio, Radicado, TramiteCatastral, PredioTramitecatastral,
+    ColDocumentotipo, ColInteresadotipo, Interesado, InteresadoPredio, Terreno, Unidadconstruccion, EstructuraAvaluo,
+    PredioUnidadespacial,
     #####***************************************************************DOMINIOS
     #GRUPO PREDIO
     CrPrediotipo, CrCondicionprediotipo, CrDestinacioneconomicatipo, CrEstadotipo,
@@ -438,7 +439,8 @@ class RadicadoListView(generics.ListAPIView):
                         f"No se encontró ningún radicado con el npn {npn}"
                     })
 
-            return queryset
+            # Ordenar de forma descendente por ID (más recientes primero)
+            return queryset.order_by('-id')
         except Exception as e:
             logger.error(f"Error al obtener queryset de radicados: {str(e)}", exc_info=True)
             raise
@@ -1405,31 +1407,41 @@ class ActualizarMutacionView(APIView):
                 if error_response:
                     return error_response
 
-                # 2. Identificar los predios 'Novedad' existentes para este trámite.
-                # Se asume una estructura donde la mutación tiene una lista de 'predios'.
-                predios_novedad_existentes = Predio.objects.filter(
-                    historial_predio__predio_tramitecatastral__tramite_catastral=tramite,
-                    estado__ilicode='Novedad'
-                ).distinct()
-                
-                # Mapear predios existentes por un identificador único del JSON (ej: npn_provisional)
-                # para saber cuál actualizar.
-                mapa_predios_existentes = {p.numero_predial_nacional: p for p in predios_novedad_existentes}
-
-                # 3. Procesar cada predio en la solicitud de mutación
+                # 2. Procesar cada predio en la solicitud de mutación
                 predios_data = mutacion_data.get('predios', [])
                 if not predios_data:
                     raise ValidationError("La mutación no contiene la lista de 'predios' a actualizar.")
 
                 for predio_data in predios_data:
-                    npn_actual = predio_data.get('numero_predial_nacional')
-                    predio_a_actualizar = mapa_predios_existentes.get(npn_actual)
-
-                    if not predio_a_actualizar:
-                        logger.warning(f"Se omitió el predio con NPN '{npn_actual}' de la solicitud, ya que no corresponde a un predio 'Novedad' existente en este trámite.")
-                        continue
+                    # Obtener predio_id del request
+                    predio_id = predio_data.get('predio_id')
+                    if not predio_id:
+                        raise ValidationError("Cada predio en la solicitud debe contener 'predio_id'.")
                     
-                    # 4. Actualización granular por componente
+                    try:
+                        # Obtener el predio directamente por ID
+                        predio_a_actualizar = Predio.objects.get(id=predio_id)
+                    except Predio.DoesNotExist:
+                        raise ValidationError(f"El predio con ID '{predio_id}' no existe.")
+                    
+                    # Validar que el predio pertenece a este trámite y está en estado 'Novedad'
+                    predio_tramite = PredioTramitecatastral.objects.filter(
+                        predio=predio_a_actualizar,
+                        tramite_catastral=tramite
+                    ).first()
+                    
+                    if not predio_tramite:
+                        raise ValidationError(
+                            f"El predio con ID '{predio_id}' no está asociado al trámite {tramite_id}."
+                        )
+                    
+                    if predio_a_actualizar.estado.ilicode != 'Novedad':
+                        raise ValidationError(
+                            f"El predio con ID '{predio_id}' no está en estado 'Novedad'. "
+                            f"Estado actual: '{predio_a_actualizar.estado.ilicode}'"
+                        )
+                    
+                    # 3. Actualización granular por componente
                     self._actualizar_componentes_del_predio(predio_a_actualizar, predio_data, tramite)
 
                 return Response({
@@ -1468,17 +1480,16 @@ class ActualizarMutacionView(APIView):
     def _actualizar_componentes_del_predio(self, predio, predio_data, tramite):
         """Orquesta la actualización granular de los componentes de un predio."""
         
-        # Actualizar datos básicos del predio (si se proporcionan)
-        if any(key in predio_data for key in ['direccion', 'condicion_predio', 'destinacion_economica']):
-             # Instanciar helper de gestión para reutilizar la lógica de actualización
-            gestion_helper = IncorporacionGestionSerializer(predio, predio_data, tramite)
-            gestion_helper.actualizar_datos_predio()
+        # NOTA: Para M1 no se actualizan datos básicos del predio (direccion, condicion_predio, destinacion_economica)
+        # Solo se actualizan interesados y fuente administrativa
 
         # Actualizar interesados (si se proporcionan)
         if 'interesados' in predio_data:
-            InteresadoPredio.objects.filter(predio=predio).delete()
-            interesado_helper = IncorporarInteresadoSerializer(predio, predio_data['interesados'], tramite)
-            interesado_helper.incorporar()
+            self._actualizar_interesados(predio, predio_data['interesados'], tramite)
+        
+        # Actualizar fuente administrativa (si se proporciona)
+        if 'fuente_administrativa' in predio_data:
+            self._actualizar_fuente_administrativa(predio, predio_data['fuente_administrativa'], tramite)
 
         # Actualizar terrenos (si se proporcionan)
         if 'terrenos' in predio_data:
@@ -1502,6 +1513,361 @@ class ActualizarMutacionView(APIView):
             EstructuraAvaluo.objects.filter(predio=predio).delete()
             # incorporador.incorporar_avaluo(...)
             logger.info(f"Lógica de actualización de avalúos para predio {predio.id} debe ser implementada.")
+
+    def _actualizar_interesados(self, predio, interesados_data, tramite):
+        """
+        Actualiza los interesados del predio según las reglas de negocio:
+        - Si el request tiene solo 1 interesado: el predio conserva solo ese interesado
+        - Si el request tiene múltiples interesados: se conservan los que corresponden y se agregan los nuevos
+        - Si un interesado corresponde a uno existente:
+          * Si no está asociado a otro predio → se actualiza su información
+          * Si está asociado a otro predio → se crea un nuevo registro y se asocia al predio del trámite,
+            eliminando la relación antigua (si no tiene historial)
+        """
+        from registro.apps.catastro.serializers import InteresadoSerializer as InteresadoModelSerializer
+        
+        # Obtener las relaciones actuales de interesados con este predio
+        relaciones_actuales = InteresadoPredio.objects.filter(predio=predio).select_related('interesado')
+        # Mapear relaciones actuales por identificador único (tipo_documento_id + numero_documento)
+        relaciones_por_identificador = {}
+        for rel in relaciones_actuales:
+            interesado = rel.interesado
+            identificador = (
+                interesado.tipo_documento_id,
+                interesado.numero_documento or '',
+            )
+            relaciones_por_identificador[identificador] = rel
+        
+        # IDs de interesados que se mantendrán en el predio
+        nuevos_interesados_ids = set()
+        relaciones_a_eliminar_por_reemplazo = []
+        
+        for interesado_data in interesados_data:
+            # Asignar valor por defecto para 'autoreconocimientoetnico' si no se proporciona
+            if 'autoreconocimientoetnico' not in interesado_data or not interesado_data.get('autoreconocimientoetnico'):
+                interesado_data['autoreconocimientoetnico'] = 335  # ID para "No aplica"
+            
+            # Validar datos del interesado
+            serializer_interesado = InteresadoModelSerializer(data=interesado_data)
+            serializer_interesado.is_valid(raise_exception=True)
+            validated_data = serializer_interesado.validated_data
+            
+            # Construir campos de búsqueda
+            tipo_documento = validated_data.get('tipo_documento')
+            numero_documento = validated_data.get('numero_documento')
+            tipo_interesado_obj = validated_data.get('tipo_interesado')
+            
+            search_fields = {
+                'tipo_documento': tipo_documento,
+                'numero_documento': numero_documento,
+            }
+            
+            defaults = {
+                'tipo_documento': tipo_documento,
+                'numero_documento': numero_documento,
+                'primer_nombre': validated_data.get('primer_nombre'),
+                'segundo_nombre': validated_data.get('segundo_nombre'),
+                'primer_apellido': validated_data.get('primer_apellido'),
+                'segundo_apellido': validated_data.get('segundo_apellido'),
+                'razon_social': validated_data.get('razon_social'),
+                'sexo': validated_data.get('sexo'),
+                'tipo_interesado': tipo_interesado_obj,
+                'autoreconocimientoetnico': validated_data.get('autoreconocimientoetnico'),
+            }
+            
+            # Ajustar campos de búsqueda según tipo de interesado
+            if tipo_interesado_obj and tipo_interesado_obj.t_id == 6:  # Persona Natural
+                search_fields.update({
+                    'primer_nombre': defaults.get('primer_nombre'),
+                    'segundo_nombre': defaults.get('segundo_nombre'),
+                    'primer_apellido': defaults.get('primer_apellido'),
+                    'segundo_apellido': defaults.get('segundo_apellido'),
+                })
+            elif tipo_interesado_obj:  # Persona Jurídica
+                search_fields['razon_social'] = defaults.get('razon_social')
+            
+            # Construir nombre completo
+            nombre_completo = f"{defaults.get('primer_nombre', '')} {defaults.get('segundo_nombre', '')} {defaults.get('primer_apellido', '')} {defaults.get('segundo_apellido', '')}".strip()
+            if not nombre_completo:
+                nombre_completo = defaults.get('razon_social')
+            defaults['nombre'] = nombre_completo
+            
+            # Identificar si este interesado corresponde a uno existente en el predio
+            # Se identifica por tipo_documento + numero_documento
+            tipo_doc_id = tipo_documento.id if hasattr(tipo_documento, 'id') else tipo_documento
+            identificador_request = (
+                tipo_doc_id,
+                numero_documento or '',
+            )
+            
+            relacion_existente_en_predio = relaciones_por_identificador.get(identificador_request)
+            
+            # Buscar si el interesado ya existe en la base de datos
+            try:
+                interesado_existente = Interesado.objects.get(**search_fields)
+                
+                # Verificar si el interesado está asociado a otros predios (además de este)
+                otras_relaciones = InteresadoPredio.objects.filter(
+                    interesado=interesado_existente
+                ).exclude(predio=predio)
+                
+                if otras_relaciones.exists():
+                    # El interesado está asociado a otro predio: crear un nuevo registro
+                    interesado_nuevo = Interesado.objects.create(**defaults)
+                    # Crear relación con el nuevo interesado
+                    relacion_nueva = InteresadoPredio.objects.create(
+                        interesado=interesado_nuevo,
+                        predio=predio
+                    )
+                    nuevos_interesados_ids.add(interesado_nuevo.id)
+                    
+                    # Si había una relación antigua en este predio con el mismo identificador, marcarla para eliminación
+                    if relacion_existente_en_predio:
+                        relaciones_a_eliminar_por_reemplazo.append(relacion_existente_en_predio)
+                else:
+                    # El interesado no está asociado a otro predio: actualizar su información
+                    for key, value in defaults.items():
+                        setattr(interesado_existente, key, value)
+                    interesado_existente.save()
+                    # Crear o mantener la relación
+                    relacion, created = InteresadoPredio.objects.get_or_create(
+                        interesado=interesado_existente,
+                        predio=predio
+                    )
+                    nuevos_interesados_ids.add(interesado_existente.id)
+                    
+            except Interesado.DoesNotExist:
+                # El interesado no existe: crear uno nuevo
+                interesado_nuevo = Interesado.objects.create(**defaults)
+                relacion_nueva = InteresadoPredio.objects.create(
+                    interesado=interesado_nuevo,
+                    predio=predio
+                )
+                nuevos_interesados_ids.add(interesado_nuevo.id)
+                
+                # Si había una relación antigua en este predio con el mismo identificador, marcarla para eliminación
+                if relacion_existente_en_predio:
+                    relaciones_a_eliminar_por_reemplazo.append(relacion_existente_en_predio)
+        
+        # Eliminar relaciones que fueron reemplazadas (si no tienen historial)
+        if relaciones_a_eliminar_por_reemplazo:
+            relaciones_reemplazo_ids = [rel.id for rel in relaciones_a_eliminar_por_reemplazo]
+            relaciones_reemplazo_con_historial = Historial_predio.objects.filter(
+                interesado_predio_id__in=relaciones_reemplazo_ids
+            ).values_list('interesado_predio_id', flat=True).distinct()
+            
+            relaciones_reemplazo_sin_historial = [
+                rel for rel in relaciones_a_eliminar_por_reemplazo 
+                if rel.id not in relaciones_reemplazo_con_historial
+            ]
+            if relaciones_reemplazo_sin_historial:
+                InteresadoPredio.objects.filter(
+                    id__in=[rel.id for rel in relaciones_reemplazo_sin_historial]
+                ).delete()
+        
+        # Refrescar las relaciones actuales para obtener el estado más reciente
+        # (después de haber creado/actualizado las nuevas relaciones)
+        relaciones_actuales_refrescadas = InteresadoPredio.objects.filter(predio=predio)
+        
+        # Eliminar relaciones con interesados que ya no están en la lista del request
+        relaciones_a_eliminar = relaciones_actuales_refrescadas.exclude(interesado_id__in=nuevos_interesados_ids)
+        
+        # Excluir las relaciones que ya fueron procesadas en el reemplazo
+        relaciones_reemplazo_ids = [rel.id for rel in relaciones_a_eliminar_por_reemplazo]
+        relaciones_a_eliminar = relaciones_a_eliminar.exclude(id__in=relaciones_reemplazo_ids)
+        
+        # Log para debugging
+        logger.info(
+            f"Predio {predio.id}: Nuevos interesados IDs: {nuevos_interesados_ids}, "
+            f"Relaciones a eliminar: {list(relaciones_a_eliminar.values_list('id', flat=True))}"
+        )
+        
+        # Obtener el PredioTramitecatastral para eliminar el historial del predio en novedad
+        predio_tramite = PredioTramitecatastral.objects.filter(
+            predio=predio,
+            tramite_catastral=tramite
+        ).first()
+        
+        # Eliminar relaciones que ya no están en el request
+        if relaciones_a_eliminar.exists():
+            for relacion in relaciones_a_eliminar:
+                interesado = relacion.interesado
+                relacion_id = relacion.id
+                
+                # 1. Eliminar el historial del predio en novedad para esta relación
+                if predio_tramite:
+                    historial_a_eliminar = Historial_predio.objects.filter(
+                        predio=predio,
+                        interesado_predio=relacion,
+                        predio_tramitecatastral=predio_tramite
+                    )
+                    if historial_a_eliminar.exists():
+                        historial_a_eliminar.delete()
+                        logger.info(
+                            f"Se eliminó el historial del predio {predio.id} para la relación "
+                            f"InteresadoPredio {relacion_id}"
+                        )
+                
+                # 2. Verificar si el interesado está asociado a otros predios (ANTES de eliminar)
+                otras_relaciones = InteresadoPredio.objects.filter(
+                    interesado=interesado
+                ).exclude(predio=predio)
+                
+                # 3. Verificar si hay historial en otros trámites que referencie este interesado (ANTES de eliminar)
+                # Buscar todas las relaciones InteresadoPredio de este interesado para verificar historial
+                todas_las_relaciones_interesado = InteresadoPredio.objects.filter(interesado=interesado)
+                historial_otros_tramites = Historial_predio.objects.filter(
+                    interesado_predio__in=todas_las_relaciones_interesado
+                ).exclude(predio=predio)
+                
+                # 4. Eliminar la relación InteresadoPredio
+                relacion.delete()
+                logger.info(
+                    f"Se eliminó la relación InteresadoPredio {relacion_id} del predio {predio.id}"
+                )
+                
+                # 5. Si el interesado NO está asociado a otro predio y NO tiene historial en otros trámites,
+                # eliminar también el registro Interesado
+                if not otras_relaciones.exists() and not historial_otros_tramites.exists():
+                    interesado_id = interesado.id
+                    interesado.delete()
+                    logger.info(
+                        f"Se eliminó el registro Interesado {interesado_id} porque no está "
+                        f"asociado a otros predios ni tiene historial en otros trámites"
+                    )
+                elif otras_relaciones.exists():
+                    logger.info(
+                        f"Se mantuvo el registro Interesado {interesado.id} porque está "
+                        f"asociado a otros predios"
+                    )
+                elif historial_otros_tramites.exists():
+                    logger.info(
+                        f"Se mantuvo el registro Interesado {interesado.id} porque tiene "
+                        f"historial en otros trámites"
+                    )
+        
+        # Crear registros en Historial_predio para los interesados actualizados/creados
+        self._crear_historial_interesados(predio, tramite)
+    
+    def _crear_historial_interesados(self, predio, tramite):
+        """
+        Actualiza los registros en Historial_predio para los interesados del predio.
+        - Conserva los registros existentes de predio_unidadespacial (sin modificar)
+        - Elimina los registros de historial de interesados que ya no existen
+        - Crea solo nuevos registros para los nuevos interesados que no tienen historial
+        
+        IMPORTANTE: Los registros de historial deben ser SEPARADOS:
+        - Un registro para cada interesado_predio (con predio_unidadespacial=None)
+        - Un registro para cada predio_unidadespacial (con interesado_predio=None)
+        NO se pueden combinar ambos en un mismo registro.
+        """
+        # Obtener el PredioTramitecatastral asociado al predio y trámite
+        predio_tramite = PredioTramitecatastral.objects.filter(
+            predio=predio,
+            tramite_catastral=tramite
+        ).first()
+        
+        if not predio_tramite:
+            logger.warning(
+                f"No se encontró PredioTramitecatastral para predio {predio.id} y trámite {tramite.id}. "
+                f"No se crearán registros de historial."
+            )
+            return
+        
+        # Obtener las relaciones actuales de InteresadoPredio del predio (después de la actualización)
+        relaciones_interesados_actuales = InteresadoPredio.objects.filter(predio=predio)
+        
+        # Obtener los registros de historial existentes para este predio y trámite
+        historial_existente = Historial_predio.objects.filter(
+            predio=predio,
+            predio_tramitecatastral=predio_tramite
+        )
+        
+        # Separar registros existentes: los de unidades espaciales (que se conservan) y los de interesados
+        historial_unidades_existentes = historial_existente.filter(
+            predio_unidadespacial__isnull=False,
+            interesado_predio__isnull=True
+        )
+        
+        historial_interesados_existentes = historial_existente.filter(
+            interesado_predio__isnull=False,
+            predio_unidadespacial__isnull=True
+        )
+        
+        # Obtener los IDs de interesados que ya tienen historial
+        interesados_con_historial = historial_interesados_existentes.values_list(
+            'interesado_predio_id', flat=True
+        ).distinct()
+        
+        # Identificar relaciones de interesados que ya no existen (se eliminaron)
+        relaciones_interesados_actuales_ids = set(relaciones_interesados_actuales.values_list('id', flat=True))
+        relaciones_eliminadas = historial_interesados_existentes.exclude(
+            interesado_predio_id__in=relaciones_interesados_actuales_ids
+        )
+        
+        # Eliminar registros de historial de interesados que ya no existen
+        if relaciones_eliminadas.exists():
+            relaciones_eliminadas.delete()
+            logger.info(
+                f"Se eliminaron {relaciones_eliminadas.count()} registros de historial "
+                f"de interesados que ya no existen para el predio {predio.id}"
+            )
+        
+        # Crear registros de historial solo para los nuevos interesados (que no tienen historial)
+        nuevos_registros_historial = []
+        
+        for interesado_predio in relaciones_interesados_actuales:
+            # Solo crear historial si este interesado_predio no tiene historial existente
+            if interesado_predio.id not in interesados_con_historial:
+                nuevos_registros_historial.append(
+                    Historial_predio(
+                        predio=predio,
+                        interesado_predio=interesado_predio,
+                        predio_unidadespacial=None,  # IMPORTANTE: separado, no combinado
+                        predio_tramitecatastral=predio_tramite
+                    )
+                )
+        
+        # Crear los nuevos registros de historial
+        if nuevos_registros_historial:
+            Historial_predio.objects.bulk_create(nuevos_registros_historial)
+            logger.info(
+                f"Se crearon {len(nuevos_registros_historial)} nuevos registros en Historial_predio "
+                f"para interesados del predio {predio.id} y trámite {tramite.id}"
+            )
+        
+        # Log de resumen
+        logger.info(
+            f"Historial actualizado para predio {predio.id}: "
+            f"Conservados {historial_unidades_existentes.count()} registros de unidades espaciales, "
+            f"Conservados {historial_interesados_existentes.filter(interesado_predio_id__in=relaciones_interesados_actuales_ids).count()} registros de interesados existentes, "
+            f"Creados {len(nuevos_registros_historial)} nuevos registros de interesados"
+        )
+    
+    def _actualizar_fuente_administrativa(self, predio, fuente_data, tramite):
+        """
+        Actualiza la fuente administrativa del predio.
+        Si ya existe una relación, la elimina y crea una nueva.
+        """
+        from registro.apps.catastro.models import PredioFuenteadministrativa
+        
+        # Validar que la fuente no esté vacía
+        interesado_helper = IncorporarInteresadoSerializer()
+        if interesado_helper.es_fuente_administrativa_vacia(fuente_data):
+            logger.warning(f"Se omitió la fuente administrativa para el predio {predio.id} porque está vacía.")
+            return
+        
+        # Eliminar relaciones existentes de fuente administrativa con este predio
+        PredioFuenteadministrativa.objects.filter(predio=predio).delete()
+        
+        # Crear nueva fuente administrativa
+        instancia_fuente = interesado_helper.create_fuenteadministrativa(fuente_data)
+        if instancia_fuente:
+            # Crear relación predio-fuente administrativa
+            interesado_helper.create_Predio_fuenteadministrativa({
+                'predio': predio,
+                'fuenteadministrativa': instancia_fuente
+            })
 
 class PredioDetalleTramiteAPIView(APIView):
     """
