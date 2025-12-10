@@ -27,10 +27,11 @@ class IncorporacionUnidadesSerializer():
         """
         Procesa un archivo .zip que contiene un Shapefile.
         
-        Extrae las geometrías y las devuelve en un diccionario
-        de Features GeoJSON, con el 'identifica' de cada unidad como clave.
+        Extrae las geometrías y las devuelve en una lista de Features GeoJSON.
+        Permite múltiples features con el mismo identificador, ya que pueden
+        representar diferentes polígonos de la misma unidad.
         """
-        features = {}
+        features = []
         # Usar un directorio temporal para extraer los archivos de forma segura
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
@@ -80,8 +81,6 @@ class IncorporacionUnidadesSerializer():
 
                 # Iterar sobre el GeoDataFrame transformado
                 for index, row in gdf_4326.iterrows():
-                    identificador = str(row['identifica'])
-                    
                     # Convertir todas las propiedades a un formato JSON serializable
                     properties = row.drop('geometry').to_dict()
                     for key, value in properties.items():
@@ -95,7 +94,8 @@ class IncorporacionUnidadesSerializer():
                         "geometry": mapping(row['geometry']), # Usar la geometría ya transformada a 4326
                         "properties": properties
                     }
-                    features[identificador] = feature
+                    # Agregar todas las features a la lista, permitiendo duplicados de identificador
+                    features.append(feature)
 
             except zipfile.BadZipFile:
                 raise ValidationError("El archivo proporcionado no es un .zip válido.")
@@ -207,6 +207,13 @@ class IncorporacionUnidadesSerializer():
         Crea las instancias de CaracteristicasUnidadconstruccion y sus geometrías
         a partir de una lista de características y un FeatureCollection de geometrías,
         asociándolas por el campo 'identificador'.
+        
+        Lógica:
+        - Si hay múltiples polígonos con el mismo 'codigo' e 'identifica', comparten
+          la misma CaracteristicasUnidadconstruccion pero se crean múltiples registros
+          en Unidadconstruccion (uno por cada polígono).
+        - Si hay polígonos con el mismo 'codigo' pero diferente 'identifica', cada uno
+          tiene su propia CaracteristicasUnidadconstruccion.
         """
         if not list_json or not list_json.get('unidades'):
             return []
@@ -222,36 +229,49 @@ class IncorporacionUnidadesSerializer():
         if not geometria_data or not geometria_data.get('features'):
             raise ValidationError("Se requiere el campo 'geometry_unidad' con un FeatureCollection válido.")
 
-        # Crear un mapa de geometrías por identificador
-        mapa_geometrias = {}
+        npn = list_json.get('npn')
+        
+        # Crear un mapa de geometrías agrupadas por (codigo, identifica)
+        # Clave: (codigo, identifica) -> Lista de features
+        mapa_geometrias_por_grupo = {}
         for feature in geometria_data['features']:
             props = feature.get('properties', {})
+            codigo_geo = props.get('codigo')
             identificador_geo = props.get('identifica')
-            if identificador_geo:
-                mapa_geometrias[str(identificador_geo)] = feature
+            
+            if codigo_geo and identificador_geo:
+                # Validar que el código coincida con el NPN del proceso
+                if str(codigo_geo).strip() != str(npn).strip():
+                    raise ValidationError(
+                        f"El número predial de la geometría ('{str(codigo_geo).strip()}') "
+                        f"no coincide con el del proceso ('{str(npn).strip()}')."
+                    )
+                
+                # Clave compuesta: (codigo, identifica)
+                grupo_key = (str(codigo_geo).strip(), str(identificador_geo))
+                
+                if grupo_key not in mapa_geometrias_por_grupo:
+                    mapa_geometrias_por_grupo[grupo_key] = []
+                mapa_geometrias_por_grupo[grupo_key].append(feature)
 
-        npn = list_json.get('npn')
+        # Crear un mapa de características por identificador para acceso rápido
+        mapa_caracteristicas = {}
+        for unidad_data in caracteristicas_unidades:
+            identificador = str(unidad_data.get('identificador'))
+            mapa_caracteristicas[identificador] = unidad_data
+
         unidades_creadas = []
 
-        for unidad_data in caracteristicas_unidades:
-            identificador_caracteristica = str(unidad_data.get('identificador'))
-            
-            # Buscar la geometría correspondiente en el mapa
-            geometria_feature = mapa_geometrias.get(identificador_caracteristica)
-            if not geometria_feature:
-                raise ValidationError(f"No se encontró una geometría con el identificador '{identificador_caracteristica}' en 'geometry_unidad'.")
-
-            # VALIDACIÓN: El NPN de la geometría debe coincidir con el NPN del proceso.
-            codigo_geometria = geometria_feature.get('properties', {}).get('codigo')
-            if codigo_geometria and str(codigo_geometria).strip() != str(npn).strip():
-                raise ValidationError(
-                    f"El número predial de la geometría ('{str(codigo_geometria).strip()}') para el identificador '{identificador_caracteristica}' "
-                    f"no coincide con el del proceso ('{str(npn).strip()}')."
-                )
+        # Procesar cada grupo de geometrías (mismo codigo + mismo identifica)
+        for (codigo_grupo, identificador_grupo), geometrias_features in mapa_geometrias_por_grupo.items():
+            # Buscar los datos de características para este identificador
+            unidad_data = mapa_caracteristicas.get(identificador_grupo)
+            if not unidad_data:
+                raise ValidationError(f"No se encontraron datos de características para el identificador '{identificador_grupo}' en 'geometry_unidad'.")
 
             # PREPARAR DATOS DE CARACTERÍSTICAS DIRECTAMENTE PARA EL SERIALIZER
             dict_create_unidades = {
-                'identificador': identificador_caracteristica,
+                'identificador': identificador_grupo,
                 'total_plantas': unidad_data.get('total_plantas'),
                 'anio_construccion': unidad_data.get('anio_construccion'),
                 'avaluo_unidad': unidad_data.get('avaluo_unidad'),
@@ -262,7 +282,7 @@ class IncorporacionUnidadesSerializer():
                 'uso': unidad_data.get('uso'),
             }
             
-            # VALIDAR Y CREAR A TRAVÉS DEL SERIALIZER
+            # VALIDAR Y CREAR UNA SOLA CaracteristicasUnidadconstruccion PARA ESTE GRUPO
             serializer = UnidadesSerializer(data=dict_create_unidades)
             instance_caracteristicas_unidad = None
             try:
@@ -275,51 +295,53 @@ class IncorporacionUnidadesSerializer():
                     first_key = next(iter(error_detail))
                     first_error = error_detail[first_key][0]
                     if "does not exist" in first_error:
-                        error_message = f"El ID proporcionado para '{first_key}' en la unidad '{identificador_caracteristica}' no es válido."
+                        error_message = f"El ID proporcionado para '{first_key}' en la unidad '{identificador_grupo}' no es válido."
                     else:
-                        error_message = f"Error en el campo '{first_key}' de la unidad '{identificador_caracteristica}': {first_error}"
+                        error_message = f"Error en el campo '{first_key}' de la unidad '{identificador_grupo}': {first_error}"
                 raise ValidationError(error_message)
 
-            # LÓGICA PARA MANEJAR GEOMETRÍA
-            instance_unidad = None
-            
-            geom_input = self.get_geometria_from_data(geometria_feature.get('geometry'))
-
-            if not geom_input:
-                logger.warning(f"No se pudo obtener la geometría para la unidad '{identificador_caracteristica}', saltando...")
-                continue
-            
-            # Asegurarnos de tener ambas geometrías: WGS84 (4326) y MAGNA (9377)
-            if geom_input.srid == 4326:
-                geom_wgs84 = geom_input
-                transform_to_magna = CoordTransform(SpatialReference(4326), SpatialReference(9377))
-                geom_magna = geom_wgs84.transform(transform_to_magna, clone=True)
-            elif geom_input.srid == 9377:
-                geom_magna = geom_input
-                transform_to_wgs84 = CoordTransform(SpatialReference(9377), SpatialReference(4326))
-                geom_wgs84 = geom_magna.transform(transform_to_wgs84, clone=True)
-            else:
-                logger.error(f"SRID no reconocido ({geom_input.srid}) en la geometría de entrada para la unidad '{identificador_caracteristica}'. Saltando.")
-                continue
-
-            # Aseguramos que ambas geometrías sean MultiPolygon
-            final_geom_wgs84 = MultiPolygon(geom_wgs84) if isinstance(geom_wgs84, Polygon) else geom_wgs84
-            final_geom_magna = MultiPolygon(geom_magna) if isinstance(geom_magna, Polygon) else geom_magna
-
+            # CREAR MÚLTIPLES REGISTROS DE Unidadconstruccion, UNO POR CADA GEOMETRÍA
+            # Todos compartirán la misma CaracteristicasUnidadconstruccion
             instance_tipo_planta = self._obtener_tipo_planta_por_defecto()
             
-            instance_unidad = Unidadconstruccion.objects.create(
-                caracteristicas_unidadconstruccion=instance_caracteristicas_unidad,
-                geom=final_geom_wgs84,
-                geometria=final_geom_magna,
-                planta_ubicacion=unidad_data.get('planta_ubicacion'),
-                altura=unidad_data.get('altura'),
-                comienzo_vida_util=datetime.now().date(),
-                tipo_planta=instance_tipo_planta
-            )
-            
-            if instance_unidad:
-                unidades_creadas.append(instance_unidad)
+            for geometria_feature in geometrias_features:
+                # LÓGICA PARA MANEJAR GEOMETRÍA
+                geom_input = self.get_geometria_from_data(geometria_feature.get('geometry'))
+
+                if not geom_input:
+                    logger.warning(f"No se pudo obtener la geometría para la unidad '{identificador_grupo}', saltando esta geometría...")
+                    continue
+                
+                # Asegurarnos de tener ambas geometrías: WGS84 (4326) y MAGNA (9377)
+                if geom_input.srid == 4326:
+                    geom_wgs84 = geom_input
+                    transform_to_magna = CoordTransform(SpatialReference(4326), SpatialReference(9377))
+                    geom_magna = geom_wgs84.transform(transform_to_magna, clone=True)
+                elif geom_input.srid == 9377:
+                    geom_magna = geom_input
+                    transform_to_wgs84 = CoordTransform(SpatialReference(9377), SpatialReference(4326))
+                    geom_wgs84 = geom_magna.transform(transform_to_wgs84, clone=True)
+                else:
+                    logger.error(f"SRID no reconocido ({geom_input.srid}) en la geometría de entrada para la unidad '{identificador_grupo}'. Saltando esta geometría.")
+                    continue
+
+                # Aseguramos que ambas geometrías sean MultiPolygon
+                final_geom_wgs84 = MultiPolygon(geom_wgs84) if isinstance(geom_wgs84, Polygon) else geom_wgs84
+                final_geom_magna = MultiPolygon(geom_magna) if isinstance(geom_magna, Polygon) else geom_magna
+
+                # Crear un registro de Unidadconstruccion para cada geometría
+                instance_unidad = Unidadconstruccion.objects.create(
+                    caracteristicas_unidadconstruccion=instance_caracteristicas_unidad,
+                    geom=final_geom_wgs84,
+                    geometria=final_geom_magna,
+                    planta_ubicacion=unidad_data.get('planta_ubicacion'),
+                    altura=unidad_data.get('altura'),
+                    comienzo_vida_util=datetime.now().date(),
+                    tipo_planta=instance_tipo_planta
+                )
+                
+                if instance_unidad:
+                    unidades_creadas.append(instance_unidad)
 
         return unidades_creadas
 

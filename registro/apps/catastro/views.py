@@ -1151,12 +1151,13 @@ class ProcesarGeometriaView(APIView):
         
         try:
             helper = IncorporacionUnidadesHelper()
-            features_dict = helper._procesar_geometria_zip(archivo_zip)
+            features_list = helper._procesar_geometria_zip(archivo_zip)
             
             # Construir la respuesta final FeatureCollection
+            # features_list ya es una lista, no necesita conversión
             feature_collection = {
                 "type": "FeatureCollection",
-                "features": list(features_dict.values()) # Convertimos los valores del diccionario a una lista
+                "features": features_list
             }
 
             return Response(feature_collection, status=status.HTTP_200_OK)
@@ -1504,9 +1505,119 @@ class ActualizarMutacionView(APIView):
 
         # Actualizar unidades de construcción (si se proporcionan)
         if 'unidades' in predio_data:
-            Unidadconstruccion.objects.filter(prediounidadespacial__predio=predio).delete()
-            # incorporador.incorporar_unidades(...)
-            logger.info(f"Lógica de actualización de unidades para predio {predio.id} debe ser implementada.")
+            unidades_data = predio_data.get('unidades', [])
+            
+            # Si hay unidades para crear
+            if unidades_data:
+                # Obtener las relaciones de unidades constructivas del predio
+                relaciones_unidades = PredioUnidadespacial.objects.filter(
+                    predio=predio,
+                    unidadconstruccion__isnull=False
+                ).select_related('unidadconstruccion')
+                
+                # Obtener las instancias de Unidadconstruccion antes de eliminar las relaciones
+                unidades_a_eliminar = [rel.unidadconstruccion for rel in relaciones_unidades if rel.unidadconstruccion]
+                
+                # Eliminar registros en Historial_predio que tengan estas relaciones
+                for relacion in relaciones_unidades:
+                    Historial_predio.objects.filter(
+                        predio_unidadespacial=relacion
+                    ).delete()
+                
+                # Eliminar las relaciones en PredioUnidadespacial primero
+                relaciones_unidades.delete()
+                
+                # Ahora eliminar las instancias físicas de Unidadconstruccion
+                # (solo las que estaban asociadas a este predio y no tienen otras relaciones)
+                for unidad in unidades_a_eliminar:
+                    # Verificar que la unidad no tenga otras relaciones antes de eliminarla
+                    otras_relaciones = PredioUnidadespacial.objects.filter(
+                        unidadconstruccion=unidad
+                    ).exists()
+                    if not otras_relaciones:
+                        unidad.delete()
+                
+                # Preparar datos para crear nuevas unidades
+                npn = predio_data.get('numero_predial_nacional') or predio.numero_predial_nacional
+                geometry_unidad = predio_data.get('geometry_unidad')
+                
+                if not geometry_unidad:
+                    raise ValidationError("Se requiere 'geometry_unidad' para crear las unidades de construcción.")
+                
+                # Preparar el payload en el formato esperado por create_unidades
+                unidades_payload = {
+                    'npn': npn,
+                    'unidades': unidades_data,
+                    'geometry_unidad': geometry_unidad
+                }
+                
+                # Crear las nuevas unidades usando IncorporacionUnidadesHelper
+                incorporador_unidades = IncorporacionUnidadesHelper()
+                unidades_creadas = incorporador_unidades.create_unidades(unidades_payload)
+                
+                # Crear las relaciones en PredioUnidadespacial
+                from registro.apps.catastro.incorporacion.incorporar_predio_unidadespacial import IncorporarPredioUnidadespacial
+                incorporador_unidadespacial = IncorporarPredioUnidadespacial()
+                
+                # Preparar datos para crear PredioUnidadespacial
+                data_unidadespacial = {
+                    'unidades': unidades_creadas,
+                    'terrenos': None,
+                    'predio_novedad': predio,
+                    'predio_novedad_dos': None,
+                    'predio_actual': None,
+                    'npn': npn,
+                    'resolucion_predio': None,
+                    'eliminar_unidad': 'NO',
+                    'es_mutacion_tercera': False
+                }
+                
+                unidades_espaciales = incorporador_unidadespacial.create_Unidadespacial(data_unidadespacial)
+                
+                # Crear registros en Historial_predio para las nuevas relaciones
+                from registro.apps.catastro.incorporacion.incorporar_historial_predio import IncorporacionHistorialPredioSerializer
+                incorporador_historial = IncorporacionHistorialPredioSerializer()
+                
+                # Obtener el PredioTramitecatastral asociado al trámite y predio
+                predio_tramite = PredioTramitecatastral.objects.filter(
+                    predio=predio,
+                    tramite_catastral=tramite
+                ).first()
+                
+                historial_data = {
+                    'predio': predio,
+                    'predio_tramitecatastral': predio_tramite,
+                    'interesado_predio': [],
+                    'predio_unidadespacial': unidades_espaciales
+                }
+                
+                incorporador_historial.create_resolucion_historica(historial_data)
+                
+                logger.info(f"Unidades de construcción actualizadas para predio {predio.id}. Se crearon {len(unidades_creadas)} nuevas unidades.")
+            else:
+                # Si no hay unidades, eliminar todas las existentes
+                relaciones_unidades = PredioUnidadespacial.objects.filter(
+                    predio=predio,
+                    unidadconstruccion__isnull=False
+                ).select_related('unidadconstruccion')
+                
+                unidades_a_eliminar = [rel.unidadconstruccion for rel in relaciones_unidades if rel.unidadconstruccion]
+                
+                for relacion in relaciones_unidades:
+                    Historial_predio.objects.filter(
+                        predio_unidadespacial=relacion
+                    ).delete()
+                
+                relaciones_unidades.delete()
+                
+                for unidad in unidades_a_eliminar:
+                    otras_relaciones = PredioUnidadespacial.objects.filter(
+                        unidadconstruccion=unidad
+                    ).exists()
+                    if not otras_relaciones:
+                        unidad.delete()
+                
+                logger.info(f"Todas las unidades de construcción fueron eliminadas para predio {predio.id}.")
             
         # Actualizar avalúos (si se proporcionan)
         if 'avaluo' in predio_data:
